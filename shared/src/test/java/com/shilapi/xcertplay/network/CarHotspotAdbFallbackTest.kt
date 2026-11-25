@@ -94,6 +94,9 @@ class CarHotspotAdbFallbackTest {
         assertNull(CarHotspotAdbFallback.apState("old log: " + started))
         assertNull(CarHotspotAdbFallback.apState(started.replace("mMode: 1", "mMode: 2")))
         assertEquals(false, CarHotspotAdbFallback.apState(started.replace("StartedState", "IdleState").replace("true", "false")))
+        assertEquals(false, CarHotspotAdbFallback.apState("mWifiLogProto.SoftApManagerReturnCodeCounts:\nmSoftApTetheredEvents:"))
+        val kx11Started = "--Dump of SoftApManager--\nmIfaceIsUp: true\nmApConfig.SoftApConfiguration.SSID: TestAp\nmApConfig.SoftApConfiguration.mBand: 3"
+        assertEquals(true, CarHotspotAdbFallback.apState(kx11Started))
     }
 
     @Test fun dumpParserDoesNotDiscardUnknownOrConflictingCurrentStates() {

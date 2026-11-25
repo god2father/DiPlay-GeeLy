@@ -91,11 +91,15 @@ internal object CarHotspotAdbFallback {
         if (managers.isEmpty()) {
             val numeric = Regex("(?m)^\\s*(?:mWifiApState|mSoftApState|mTetheredSoftApState)\\s*[:=]\\s*(\\d+)\\s*$")
                 .findAll(dump).map { CarHotspotStatus.stateEnabled(it.groupValues[1].toIntOrNull()) }.toList()
-            return if (numeric.any { it == null }) null else numeric.distinct().singleOrNull()
+            if (numeric.isNotEmpty()) {
+                return if (numeric.any { it == null }) null else numeric.distinct().singleOrNull()
+            }
+            // Android 11 (e.g. KX11_A2) omits any SoftApManager section on cold boot before AP has started.
+            return if (dump.contains("mWifiLogProto.SoftApManagerReturnCodeCounts:")) false else null
         }
         val tethered = managers.filter { block ->
             val mode = Regex("(?m)^\\s*(?:mMode|mOriginalModeConfiguration\\.targetMode):\\s*(\\d+)\\s*$").find(block)?.groupValues?.get(1)
-            mode == "1"
+            mode == "1" || (mode == null && block.contains("mApConfig.SoftApConfiguration"))
         }
         val states = tethered.map { block ->
             val current = Regex("(?m)^\\s*current StateMachine mode:\\s*(\\w+)\\s*$").find(block)?.groupValues?.get(1)
@@ -103,6 +107,8 @@ internal object CarHotspotAdbFallback {
             when {
                 current == "StartedState" && up == "true" -> true
                 current == "IdleState" && up == "false" -> false
+                current == null && block.contains("mApConfig.SoftApConfiguration") && up == "true" -> true
+                current == null && block.contains("mApConfig.SoftApConfiguration") && up == "false" -> false
                 else -> null
             }
         }
