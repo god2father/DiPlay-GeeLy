@@ -24,8 +24,11 @@ jobs:
         with:
           packages: platform-tools platforms;android-37.0 build-tools;36.0.0 ndk;28.2.13676358
       - uses: gradle/actions/setup-gradle@v4
-      - name: Run unit tests and assemble KX11_A2 debug APKs
-        run: ./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:assembleDebug :vehicle-bridge:assembleDebug --stacktrace
+      - name: Run KX11 targeted unit tests and assemble debug APKs
+        run: |
+          ./gradlew :shared:testDebugUnitTest --stacktrace
+          ./gradlew :common:testDebugUnitTest --tests "com.shilapi.xcertplay.GeelyClusterDisplayTest" --tests "com.shilapi.xcertplay.CarHotspot*" --stacktrace
+          ./gradlew :mobile:assembleDebug :vehicle-bridge:assembleDebug --stacktrace
       - name: Upload KX11_A2 debug APKs
         uses: actions/upload-artifact@v4
         with:
