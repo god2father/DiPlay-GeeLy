@@ -36,7 +36,6 @@
     <string name="projection_add_navigation">請先將導航加入投影版面。</string>
     <string name="projection_apply_geometry">套用位置與大小</string>
     <string name="projection_clock">時間</string>
-    <string name="projection_music">音樂</string>
     <string name="projection_editor">HUD／儀表版面</string>
     <string name="projection_editor_hint">拖曳項目即可移動，或在下方輸入其位置與大小。</string>
     <string name="projection_geometry_invalid">請輸入有效的百分比。寬度與高度須為 8–100%，且項目必須位於螢幕範圍內。</string>

@@ -21,10 +21,8 @@ import android.view.Display
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
-import com.shilapi.xcertplay.glance.CarPlayGlance
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.hud.CarPlayHudGuidance
-import com.shilapi.xcertplay.iap2.message.LaneGuidanceLane
 import java.lang.ref.WeakReference
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -59,9 +57,6 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
     private var attachedWidth = 0
     private var attachedHeight = 0
     private var guidance: CarPlayHudGuidance? = null
-    private var lanes: List<LaneGuidanceLane> = emptyList()
-    private var musicText: String? = null
-    private var stopMusicObserver: (() -> Unit)? = null
     private var navigationHidden = false
 
     fun attach(activity: Activity) {
@@ -69,32 +64,10 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
             if (activityRef?.get() !== activity) {
                 detachWindow()
                 stopVehicleReader()
-                stopMusicObserver?.invoke(); stopMusicObserver = null
                 displayManager?.unregisterDisplayListener(this)
                 activityRef = WeakReference(activity)
                 displayManager = activity.getSystemService(DisplayManager::class.java)
                 displayManager?.registerDisplayListener(this, mainHandler)
-                CarPlayGlance.laneListener = { nextLanes ->
-                    mainHandler.post {
-                        lanes = nextLanes
-                        hudView?.lanes = nextLanes
-                        refresh()
-                    }
-                }
-                stopMusicObserver = ClusterMusicState.observe { snap ->
-                    val title = snap.info.title?.trim().orEmpty()
-                    val artist = snap.info.artist?.trim().orEmpty()
-                    val formatted = when {
-                        title.isNotEmpty() && artist.isNotEmpty() -> "$title · $artist"
-                        title.isNotEmpty() -> title
-                        else -> null
-                    }
-                    if (musicText != formatted) {
-                        musicText = formatted
-                        hudView?.musicText = formatted
-                        refresh()
-                    }
-                }
             }
             refresh()
         }
@@ -105,11 +78,7 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
             if (activityRef?.get() !== activity) return@post
             detachWindow()
             stopVehicleReader()
-            stopMusicObserver?.invoke(); stopMusicObserver = null
-            CarPlayGlance.laneListener = null
             guidance = null
-            lanes = emptyList()
-            musicText = null
             navigationHidden = false
             displayManager?.unregisterDisplayListener(this)
             displayManager = null
@@ -254,13 +223,6 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
                 vehicleFrame = value; hudView?.vehicle = value
             }
         } else stopVehicleReader()
-        val glance = CarPlayGlance.snapshot()
-        // Never obscure the vehicle's stock HUD when CarPlay is not connected.
-        if (!glance.connected) {
-            windowStage = "WAITING_FOR_CARPLAY"
-            detachWindow()
-            return
-        }
         if (!Settings.canDrawOverlays(activity) || visible.isEmpty() ||
             guidance == null && visible.all { it.field == ProjectionField.NAVIGATION }) {
             windowStage = if (!Settings.canDrawOverlays(activity)) "OVERLAY_PERMISSION_REQUIRED" else "WAITING_FOR_CONTENT"
@@ -314,10 +276,6 @@ internal object GeelyHudProjection : DisplayManager.DisplayListener {
             this.elements = visible
             this.scalePercent = AirPlayPersistence.loadGeelyHudScalePercent(activity)
             this.guidance = GeelyHudProjection.guidance
-            this.lanes = GeelyHudProjection.lanes
-            this.remainingSeconds = glance.remainingSeconds
-            this.appleManeuverType = glance.maneuverType
-            this.musicText = GeelyHudProjection.musicText ?: glance.song
             this.vehicle = vehicleFrame
         }
         windowStage = "ACTIVE"
@@ -362,30 +320,6 @@ internal class GeelyHudGuidanceView(context: Context, initialScalePercent: Int) 
             invalidate()
         }
 
-    var lanes: List<LaneGuidanceLane> = emptyList()
-        set(value) {
-            if (field != value) {
-                field = value
-                invalidate()
-            }
-        }
-
-    var remainingSeconds: Long? = null
-        set(value) {
-            if (field != value) {
-                field = value
-                invalidate()
-            }
-        }
-
-    var appleManeuverType: Int? = null
-        set(value) {
-            if (field != value) {
-                field = value
-                invalidate()
-            }
-        }
-
     private val accent = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(115, 255, 198)
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
@@ -398,18 +332,6 @@ internal class GeelyHudGuidanceView(context: Context, initialScalePercent: Int) 
         color = Color.rgb(214, 224, 236)
         typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
-    private val laneMutedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(110, 214, 224, 236)
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-    }
-    private val laneHighlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(115, 255, 198)
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-    }
     private val arrow = Path()
 
     override fun onDraw(canvas: Canvas) {
@@ -418,12 +340,11 @@ internal class GeelyHudGuidanceView(context: Context, initialScalePercent: Int) 
         val checkpoint = canvas.save()
         val contentScale = scalePercent / 100f
         canvas.scale(contentScale, contentScale, width * 0.5f, height * 0.5f)
-        val hasLanes = lanes.isNotEmpty()
         val heightScale = min(height.toFloat(), width * 0.45f)
-        val centerY = if (hasLanes) height * 0.36f else height * 0.5f
-        val iconSize = heightScale * (if (hasLanes) 0.40f else 0.47f)
+        val centerY = height * 0.5f
+        val iconSize = heightScale * 0.47f
         val left = width * 0.22f
-        drawArrow(canvas, route.maneuverCode, appleManeuverType, left, centerY, iconSize)
+        drawArrow(canvas, route.maneuverCode, left, centerY, iconSize)
 
         val distance = if (route.distanceMeters >= 1_000) {
             String.format(Locale.getDefault(), "%.1f km", route.distanceMeters / 1_000f)
@@ -431,22 +352,18 @@ internal class GeelyHudGuidanceView(context: Context, initialScalePercent: Int) 
             String.format(Locale.getDefault(), "%d m", route.distanceMeters.coerceAtLeast(0))
         }
         val textLeft = width * 0.43f
-        accent.textSize = heightScale * (if (hasLanes) 0.17f else 0.19f)
-        canvas.drawText(distance, textLeft, centerY + accent.textSize * 0.10f, accent)
+        accent.textSize = heightScale * 0.19f
+        canvas.drawText(distance, textLeft, centerY + accent.textSize * 0.18f, accent)
         if (route.road.isNotBlank()) {
             roadPaint.textSize = heightScale * 0.095f
             val maxWidth = (width - textLeft - width * 0.07f).coerceAtLeast(0f)
             val road = TextUtils.ellipsize(route.road, android.text.TextPaint(roadPaint), maxWidth, TextUtils.TruncateAt.END)
-            canvas.drawText(road.toString(), textLeft, centerY + accent.textSize * 0.68f, roadPaint)
+            canvas.drawText(road.toString(), textLeft, centerY + accent.textSize * 0.75f, roadPaint)
         }
-        // Remaining distance, remaining minutes, and ETA share the summary line.
+        // The remaining distance and the iPhone's arrival time share the last line of the card.
         val info = buildList {
             route.remainingMeters?.takeIf { it > 0L }?.let { meters ->
                 add(context.getString(R.string.turn_card_info_km, meters / 1000.0))
-            }
-            remainingSeconds?.takeIf { it >= 60L }?.let { seconds ->
-                val minutes = ((seconds + 30L) / 60L).coerceAtLeast(1L)
-                add(if (minutes >= 60L) "${minutes / 60}h${minutes % 60}m" else "${minutes}min")
             }
             route.arrivalEpochSeconds?.takeIf { it > 0L }?.let { epoch ->
                 val arrival = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(epoch * 1000L))
@@ -454,107 +371,51 @@ internal class GeelyHudGuidanceView(context: Context, initialScalePercent: Int) 
             }
         }
         if (info.isNotEmpty()) {
-            etaPaint.textSize = heightScale * 0.105f
+            etaPaint.textSize = heightScale * 0.115f
             val maxWidth = (width - textLeft - width * 0.07f).coerceAtLeast(0f)
             val text = TextUtils.ellipsize(info.joinToString(" · "), android.text.TextPaint(etaPaint), maxWidth, TextUtils.TruncateAt.END)
             val baseline = if (route.road.isNotBlank()) {
-                centerY + accent.textSize * 0.68f + etaPaint.textSize * 1.2f
+                centerY + accent.textSize * 0.75f + etaPaint.textSize * 1.2f
             } else {
-                centerY + accent.textSize * 0.95f
+                centerY + accent.textSize * 1.05f
             }
             canvas.drawText(text.toString(), textLeft, baseline, etaPaint)
-        }
-        if (hasLanes) {
-            drawLaneStrip(canvas, lanes, width * 0.5f, height * 0.78f, heightScale * 0.24f)
         }
         canvas.restoreToCount(checkpoint)
     }
 
-    private fun drawLaneStrip(canvas: Canvas, items: List<LaneGuidanceLane>, centerX: Float, centerY: Float, laneHeight: Float) {
-        val count = items.size.coerceAtMost(8)
-        if (count <= 0) return
-        val spacing = (laneHeight * 0.95f).coerceAtMost((width * 0.78f) / count)
-        val startX = centerX - (count - 1) * spacing * 0.5f
-        val stroke = (laneHeight * 0.11f).coerceIn(3f, 8f)
-        laneMutedPaint.strokeWidth = stroke
-        laneHighlightPaint.strokeWidth = stroke * 1.15f
-        for (i in 0 until count) {
-            val lane = items[i]
-            val cx = startX + i * spacing
-            val paint = if (lane.recommended) laneHighlightPaint else laneMutedPaint
-            val angleDeg = (lane.highlightAngle ?: lane.angle).coerceIn(-180, 180)
-            val save = canvas.save()
-            canvas.translate(cx, centerY)
-            // Vertical stem
-            val stemBottom = laneHeight * 0.42f
-            val stemMid = 0f
-            canvas.drawLine(0f, stemBottom, 0f, stemMid, paint)
-            // Rotated branch pointing along lane angle (0 = straight up, positive = right, negative = left)
-            canvas.rotate(angleDeg.toFloat(), 0f, stemMid)
-            val tipY = -laneHeight * 0.40f
-            val head = laneHeight * 0.16f
-            canvas.drawLine(0f, stemMid, 0f, tipY, paint)
-            canvas.drawLine(-head, tipY + head, 0f, tipY, paint)
-            canvas.drawLine(head, tipY + head, 0f, tipY, paint)
-            canvas.restoreToCount(save)
-        }
-    }
-
-    private fun drawArrow(canvas: Canvas, maneuver: Int, appleType: Int?, x: Float, y: Float, size: Float) {
+    private fun drawArrow(canvas: Canvas, maneuver: Int, x: Float, y: Float, size: Float) {
         arrow.reset()
-        val isRoundabout = appleType != null && (appleType in 28..46 || appleType == 6 || appleType == 7)
-        val isDestination = appleType != null && appleType in setOf(10, 12, 24, 25, 27)
+        when (maneuver) {
+            1, 2 -> {
+                arrow.moveTo(18f, 36f); arrow.lineTo(18f, 0f)
+                arrow.quadTo(18f, -20f, -2f, -20f); arrow.lineTo(-38f, -20f)
+                arrow.moveTo(-22f, -34f); arrow.lineTo(-38f, -20f); arrow.lineTo(-22f, -6f)
+            }
+            3, 5 -> {
+                arrow.moveTo(18f, 36f); arrow.lineTo(18f, 0f); arrow.lineTo(-28f, -36f)
+                arrow.moveTo(-30f, -16f); arrow.lineTo(-28f, -36f); arrow.lineTo(-8f, -36f)
+            }
+            7, 8 -> {
+                arrow.moveTo(22f, 36f); arrow.lineTo(22f, -8f)
+                arrow.cubicTo(22f, -48f, -22f, -48f, -22f, -8f); arrow.lineTo(-22f, 16f)
+                arrow.moveTo(-36f, 0f); arrow.lineTo(-22f, 16f); arrow.lineTo(-8f, 0f)
+            }
+            11 -> {
+                arrow.moveTo(0f, 36f); arrow.lineTo(0f, -38f)
+                arrow.moveTo(-14f, -22f); arrow.lineTo(0f, -38f); arrow.lineTo(14f, -22f)
+            }
+            else -> return
+        }
         val checkpoint = canvas.save()
         canvas.translate(x, y)
         val scale = size / 88f
+        canvas.scale(if (maneuver in listOf(2, 5, 8)) -scale else scale, scale)
         accent.style = Paint.Style.STROKE
         accent.strokeWidth = 9f
         accent.strokeCap = Paint.Cap.ROUND
         accent.strokeJoin = Paint.Join.ROUND
-        when {
-            isRoundabout -> {
-                canvas.scale(scale, scale)
-                canvas.drawCircle(0f, -4f, 24f, accent)
-                canvas.drawLine(0f, 40f, 0f, 20f, accent)
-                // Exit arrow pointing upper-right
-                canvas.drawLine(17f, -21f, 34f, -38f, accent)
-                canvas.drawLine(20f, -38f, 34f, -38f, accent)
-                canvas.drawLine(34f, -24f, 34f, -38f, accent)
-            }
-            isDestination -> {
-                canvas.scale(scale, scale)
-                canvas.drawCircle(0f, -10f, 18f, accent)
-                accent.style = Paint.Style.FILL
-                canvas.drawCircle(0f, -10f, 7f, accent)
-                accent.style = Paint.Style.STROKE
-                canvas.drawLine(0f, 8f, 0f, 36f, accent)
-            }
-            else -> {
-                when (maneuver) {
-                    1, 2 -> {
-                        arrow.moveTo(18f, 36f); arrow.lineTo(18f, 0f)
-                        arrow.quadTo(18f, -20f, -2f, -20f); arrow.lineTo(-38f, -20f)
-                        arrow.moveTo(-22f, -34f); arrow.lineTo(-38f, -20f); arrow.lineTo(-22f, -6f)
-                    }
-                    3, 5 -> {
-                        arrow.moveTo(18f, 36f); arrow.lineTo(18f, 0f); arrow.lineTo(-28f, -36f)
-                        arrow.moveTo(-30f, -16f); arrow.lineTo(-28f, -36f); arrow.lineTo(-8f, -36f)
-                    }
-                    7, 8 -> {
-                        arrow.moveTo(22f, 36f); arrow.lineTo(22f, -8f)
-                        arrow.cubicTo(22f, -48f, -22f, -48f, -22f, -8f); arrow.lineTo(-22f, 16f)
-                        arrow.moveTo(-36f, 0f); arrow.lineTo(-22f, 16f); arrow.lineTo(-8f, 0f)
-                    }
-                    else -> {
-                        // Straight (11) and fallback so the HUD arrow never silently disappears.
-                        arrow.moveTo(0f, 36f); arrow.lineTo(0f, -38f)
-                        arrow.moveTo(-14f, -22f); arrow.lineTo(0f, -38f); arrow.lineTo(14f, -22f)
-                    }
-                }
-                canvas.scale(if (maneuver in listOf(2, 5, 8)) -scale else scale, scale)
-                canvas.drawPath(arrow, accent)
-            }
-        }
+        canvas.drawPath(arrow, accent)
         accent.style = Paint.Style.FILL
         canvas.restoreToCount(checkpoint)
     }
