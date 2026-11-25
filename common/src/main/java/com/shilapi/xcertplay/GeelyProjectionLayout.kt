@@ -13,6 +13,7 @@ import android.view.MotionEvent
 import android.view.View
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.hud.CarPlayHudGuidance
+import com.shilapi.xcertplay.iap2.message.LaneGuidanceLane
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -29,6 +30,7 @@ internal enum class ProjectionField(val label: Int, val property: String? = null
     AMBIENT_TEMPERATURE(R.string.projection_ambient_temperature, "AMBIENT_TEMPERATURE"),
     CABIN_TEMPERATURE(R.string.projection_cabin_temperature, "CABIN_TEMPERATURE"),
     CLOCK(R.string.projection_clock),
+    MUSIC(R.string.projection_music),
 }
 
 internal data class ProjectionElement(
@@ -95,6 +97,14 @@ internal class GeelyProjectionView(context: Context) : View(context) {
         set(value) { field = value; invalidate() }
     var guidance: CarPlayHudGuidance? = null
         set(value) { field = value; invalidate() }
+    var lanes: List<LaneGuidanceLane> = emptyList()
+        set(value) { if (field != value) { field = value; invalidate() } }
+    var remainingSeconds: Long? = null
+        set(value) { if (field != value) { field = value; invalidate() } }
+    var appleManeuverType: Int? = null
+        set(value) { if (field != value) { field = value; invalidate() } }
+    var musicText: String? = null
+        set(value) { if (field != value) { field = value; invalidate() } }
     var vehicle = ProjectionVehicleFrame()
         set(value) { field = value; invalidate() }
     var scalePercent = 100
@@ -144,9 +154,16 @@ internal class GeelyProjectionView(context: Context) : View(context) {
             if (item.field == ProjectionField.NAVIGATION) {
                 if (guidance != null) {
                     navigation.guidance = guidance
+                    navigation.lanes = lanes
+                    navigation.remainingSeconds = remainingSeconds
+                    navigation.appleManeuverType = appleManeuverType
                     navigation.layout(0, 0, rect.width().toInt(), rect.height().toInt())
                     canvas.translate(rect.left, rect.top); navigation.draw(canvas)
                 } else if (editing) drawText(canvas, rect, context.getString(item.field.label), "—")
+            } else if (item.field == ProjectionField.MUSIC) {
+                val track = musicText?.takeIf { it.isNotBlank() }?.let { "♪ $it" }
+                if (editing) drawText(canvas, rect, context.getString(item.field.label), track ?: "♪ —")
+                else if (track != null) drawValue(canvas, rect, track)
             } else {
                 val value = if (item.field == ProjectionField.CLOCK) clock.format(Date()) else formatted(item.field)
                 // tianwen | The live HUD shows only the value; the editor keeps the label for identification.

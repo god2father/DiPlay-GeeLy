@@ -36,6 +36,7 @@
     <string name="projection_add_navigation">先にナビを投影レイアウトに追加してください。</string>
     <string name="projection_apply_geometry">位置とサイズを適用</string>
     <string name="projection_clock">時刻</string>
+    <string name="projection_music">音楽</string>
     <string name="projection_editor">HUD／メーターのレイアウト</string>
     <string name="projection_editor_hint">項目をドラッグして移動するか、下に位置とサイズを入力してください。</string>
     <string name="projection_geometry_invalid">有効なパーセント値を入力してください。幅と高さは8～100%とし、項目が画面内に収まる必要があります。</string>

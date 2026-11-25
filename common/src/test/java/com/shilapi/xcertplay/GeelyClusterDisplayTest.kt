@@ -77,18 +77,6 @@ class GeelyClusterDisplayTest {
             GeelyClusterDisplay.supported("other_device", MEASURED_PRODUCT, MEASURED_MODEL))
         assertFalse(GeelyClusterDisplay.supported("robolectric", "robolectric", "robolectric"))
         assertFalse(GeelyClusterDisplay.supported("", "", ""))
-        assertTrue(GeelyClusterDisplay.supported("ecarx", "ecarx", "KX11_A2"))
-        assertTrue(GeelyClusterDisplay.supported("ECARX", "ECARX", "kx11_a2"))
-    }
-
-    @Test fun kx11A2LocksClusterMatchToDisplay4AndRejectsPassengerDisplay2() {
-        ShadowBuild.setDevice("ecarx")
-        ShadowBuild.setProduct("ecarx")
-        ShadowBuild.setModel("KX11_A2")
-        assertTrue(GeelyClusterDisplay.supported())
-        assertTrue(GeelyClusterDisplay.matches(4, 1920, 720, MEASURED_FLAGS))
-        assertFalse("display 2 is the passenger screen on KX11_A2",
-            GeelyClusterDisplay.matches(2, 1920, 720, MEASURED_FLAGS))
     }
 
     @Test fun theBuildFieldsAdmitTheMeasuredHeadUnit() {

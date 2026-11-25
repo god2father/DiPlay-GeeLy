@@ -415,6 +415,17 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         rememberLaunchAppearance()
         languagePreferenceAtCreate = AppLocale.preference(this)
         com.shilapi.xcertplay.hud.BydNavigationOutputs.onAppOpened(applicationContext)
+        // KX11_A2: reset all HUD / secondary-display projection toggles to OFF once on install/upgrade
+        // so stock AR-HUD is never obscured unless the driver explicitly turns them on.
+        if (com.shilapi.xcertplay.network.CarHotspotSettings.isKx11A2()) {
+            val prefs = getSharedPreferences("diplay_kx11_migrations", MODE_PRIVATE)
+            if (!prefs.getBoolean("kx11_hud_reset_v1", false)) {
+                AirPlayPersistence.saveGeelyHudEnabled(this, false)
+                VehicleMapSettings.setEnabled(this, false)
+                AirPlayPersistence.saveClusterMapEnabled(this, false)
+                prefs.edit().putBoolean("kx11_hud_reset_v1", true).apply()
+            }
+        }
         // A previous run may have been killed while it held the cluster projection; hand it back
         // before showing anything, so the cluster is not left on DiPlay's last frame.
         GeelyClusterProjection.releaseStale(applicationContext)
