@@ -89,6 +89,30 @@ class LocalAdbTest {
         }
     }
 
+    @Test
+    fun fallsBackToSecondaryPortWhenPrimaryPortTimesOutBeforeAuthEvenWhenMayAsk() {
+        val silentServer = ServerSocket(0)
+        val silentThread = thread(isDaemon = true) {
+            runCatching {
+                silentServer.accept().use { socket ->
+                    // Hold socket open without sending any ADB AUTH/CNXN packet so connectToPort times out.
+                    Thread.sleep(6_000)
+                }
+            }
+            runCatching { silentServer.close() }
+        }
+        val adbd = FakeAdbd(key, knowsKey = true, output = "ok7777")
+        try {
+            LocalAdb(key, port = silentServer.localPort, fallbackPorts = intArrayOf(adbd.port)).use { adb ->
+                assertEquals(LocalAdb.Access.READY, adb.connect(mayAsk = true))
+                assertEquals("ok7777", adb.shell("id"))
+            }
+        } finally {
+            runCatching { silentServer.close() }
+            silentThread.interrupt()
+        }
+    }
+
     @Test fun cancellationUnblocksAStalledShellAndPreventsImplicitReconnect() {
         val server = ServerSocket(0)
         val entered = CountDownLatch(1)

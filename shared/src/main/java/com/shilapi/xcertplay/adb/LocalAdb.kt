@@ -71,7 +71,9 @@ class LocalAdb(
             handshake(mayAsk).also { if (it != Access.READY) closeQuietly() }
         } catch (_: SocketTimeoutException) {
             closeQuietly()
-            if (mayAsk) Access.NOT_APPROVED else Access.UNREACHABLE
+            // awaitApproval() handles its own timeouts after AUTH; a timeout here means connect
+            // or initial CNXN never got an ADB reply, so treat as unreachable to allow port fallback.
+            Access.UNREACHABLE
         } catch (_: IOException) {
             closeQuietly()
             Access.UNREACHABLE

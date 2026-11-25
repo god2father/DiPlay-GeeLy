@@ -17,6 +17,10 @@ internal object CarHotspotSetup {
         context.packageManager.getApplicationInfo("com.byd.carsettings", 0).flags and ApplicationInfo.FLAG_SYSTEM != 0
     }.getOrDefault(false)
 
+    // Head units where DiPlay manages the car hotspot and permissions over local ADB (BYD + KX11_A2).
+    fun supportsAdbHotspot(context: Context, model: String = android.os.Build.MODEL ?: ""): Boolean =
+        isBydHeadUnit(context) || CarHotspotSettings.isKx11A2(model)
+
     enum class Permission(val appOp: String) {
         HOTSPOT("WRITE_SETTINGS"), BOOT_LAUNCH("SYSTEM_ALERT_WINDOW");
 
