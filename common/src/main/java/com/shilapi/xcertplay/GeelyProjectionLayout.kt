@@ -45,7 +45,13 @@ internal data class ProjectionElement(
 }
 
 internal object GeelyProjectionLayout {
-    fun defaults() = listOf(ProjectionElement(ProjectionField.NAVIGATION, 0f, 0f, 1f, 1f))
+    /** Out-of-the-box wide HUD layout (1920x720): speed left, full nav + lanes center, clock right, music bottom. */
+    fun defaults() = listOf(
+        ProjectionElement(ProjectionField.SPEED, 0.02f, 0.14f, 0.24f, 0.52f),
+        ProjectionElement(ProjectionField.NAVIGATION, 0.27f, 0.04f, 0.50f, 0.70f),
+        ProjectionElement(ProjectionField.CLOCK, 0.79f, 0.14f, 0.19f, 0.30f),
+        ProjectionElement(ProjectionField.MUSIC, 0.22f, 0.76f, 0.56f, 0.20f),
+    )
     private fun preferences(context: Context) = context.getSharedPreferences("geely_projection_layout", Context.MODE_PRIVATE)
     fun load(context: Context): List<ProjectionElement> = preferences(context).getString("layout", null)
         ?.let { runCatching { decode(it) }.getOrNull() } ?: defaults()

@@ -421,8 +421,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             val prefs = getSharedPreferences("diplay_kx11_migrations", MODE_PRIVATE)
             if (!prefs.getBoolean("kx11_hud_reset_v1", false)) {
                 AirPlayPersistence.saveGeelyHudEnabled(this, false)
+                AirPlayPersistence.saveGeelyHudDisplay(this, 3, "内置屏幕")
                 VehicleMapSettings.setEnabled(this, false)
                 AirPlayPersistence.saveClusterMapEnabled(this, false)
+                GeelyProjectionLayout.save(this, GeelyProjectionLayout.defaults())
                 prefs.edit().putBoolean("kx11_hud_reset_v1", true).apply()
             }
         }
