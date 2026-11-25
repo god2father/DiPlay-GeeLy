@@ -1,10 +1,14 @@
 package com.shilapi.xcertplay.network
 
 import android.content.Context
+import android.os.Build
 import com.shilapi.xcertplay.adb.LocalAdb
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 
 object CarHotspotSettings {
+    fun isKx11A2(model: String = Build.MODEL ?: ""): Boolean =
+        model.equals("KX11_A2", ignoreCase = true)
+
     private fun prefs(context: Context) = context.getSharedPreferences("diplay_car_hotspot", Context.MODE_PRIVATE)
 
     fun enabled(context: Context): Boolean = prefs(context).getBoolean("auto_enable", false)
@@ -19,7 +23,7 @@ object CarHotspotSettings {
 
     // Visibility is independent of the saved choice: ADB is only needed to grant permission.
     fun visible(bydAvailable: Boolean, access: LocalAdb.Access): Boolean =
-        bydAvailable && (access == LocalAdb.Access.READY || access == LocalAdb.Access.NOT_APPROVED)
+        (bydAvailable || isKx11A2()) && (access == LocalAdb.Access.READY || access == LocalAdb.Access.NOT_APPROVED)
 
     fun shouldEnable(context: Context, wireless: Boolean, mode: WirelessHotspotMode): Boolean =
         enabled(context) && wireless && mode == WirelessHotspotMode.MANUAL

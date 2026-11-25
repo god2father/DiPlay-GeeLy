@@ -32,34 +32,46 @@ internal object GeelyClusterDisplay {
     /** Model name that head unit reports. */
     private const val MODEL = "CS11_A4"
 
+    /** 2025 Geely Xingyue L (KX11_A2) identifiers measured on real vehicle. */
+    private const val KX11_DEVICE = "ecarx"
+    private const val KX11_PRODUCT = "ecarx"
+    private const val KX11_MODEL = "KX11_A2"
+
+    /** Measured on KX11_A2: Display 2 is passenger screen (PsdActivity), Display 4 is stock nav Presentation panel. */
+    const val KX11_CLUSTER_DISPLAY_ID = 4
+
     /** The cluster stream is the panel's own size: the cluster scales nothing. */
     const val STREAM_WIDTH = 1920
     const val STREAM_HEIGHT = 720
 
-    /**
-     * The one car where this cluster route has been measured. All three identifiers are required:
-     * `msmnile_gvmq` alone is Qualcomm's generic SA8155 board name, which other brands' head units
-     * report too, and on those the DIM services either do not exist or mean something else. The
-     * product and model identify the car, the same identifiers the wheel-key support uses
-     * (`GeelyHeadUnit`). Values are compared without case, because the build fields are not
-     * guaranteed to be lower case.
-     */
+    fun isKx11A2(
+        device: String = Build.DEVICE,
+        product: String = Build.PRODUCT,
+        model: String = Build.MODEL,
+    ): Boolean = device.equals(KX11_DEVICE, ignoreCase = true) &&
+        product.equals(KX11_PRODUCT, ignoreCase = true) &&
+        model.equals(KX11_MODEL, ignoreCase = true)
+
     fun supported(
         device: String = Build.DEVICE,
         product: String = Build.PRODUCT,
         model: String = Build.MODEL,
-    ): Boolean = device.equals(DEVICE, ignoreCase = true) &&
+    ): Boolean = (device.equals(DEVICE, ignoreCase = true) &&
         product.equals(PRODUCT, ignoreCase = true) &&
-        model.equals(MODEL, ignoreCase = true)
+        model.equals(MODEL, ignoreCase = true)) ||
+        isKx11A2(device, product, model)
 
     /**
-     * The cluster is the non-default presentation panel at the stream size. Its name is a
-     * localized system string ("HDMI 屏幕"), so the name is deliberately not part of the match.
+     * The cluster is the non-default presentation panel at the stream size. On KX11_A2,
+     * display 2 is the passenger screen (1920x720 HDMI), so lock to display 4.
      */
-    fun matches(displayId: Int, width: Int, height: Int, flags: Int): Boolean =
-        displayId != Display.DEFAULT_DISPLAY &&
-            (flags and Display.FLAG_PRESENTATION) != 0 &&
-            width == STREAM_WIDTH && height == STREAM_HEIGHT
+    fun matches(displayId: Int, width: Int, height: Int, flags: Int): Boolean {
+        if (displayId == Display.DEFAULT_DISPLAY ||
+            (flags and Display.FLAG_PRESENTATION) == 0 ||
+            width != STREAM_WIDTH || height != STREAM_HEIGHT
+        ) return false
+        return if (isKx11A2()) displayId == KX11_CLUSTER_DISPLAY_ID else true
+    }
 
     fun matches(display: Display, width: Int, height: Int): Boolean =
         matches(display.displayId, width, height, display.flags)

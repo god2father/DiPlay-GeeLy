@@ -79,6 +79,16 @@ class LocalAdbTest {
         LocalAdb(key, port = port).use { assertEquals(LocalAdb.Access.UNREACHABLE, it.connect(mayAsk = true)) }
     }
 
+    @Test
+    fun fallsBackToSecondaryPortWhenPrimaryPortIsClosed() {
+        val closedPort = ServerSocket(0).use { it.localPort }
+        val adbd = FakeAdbd(key, knowsKey = true, output = "ok")
+        LocalAdb(key, port = closedPort, fallbackPorts = intArrayOf(adbd.port)).use { adb ->
+            assertEquals(LocalAdb.Access.READY, adb.connect(mayAsk = false))
+            assertEquals("ok", adb.shell("id"))
+        }
+    }
+
     @Test fun cancellationUnblocksAStalledShellAndPreventsImplicitReconnect() {
         val server = ServerSocket(0)
         val entered = CountDownLatch(1)

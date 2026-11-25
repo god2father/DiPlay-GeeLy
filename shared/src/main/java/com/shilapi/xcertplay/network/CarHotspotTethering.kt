@@ -38,8 +38,11 @@ object CarHotspotTethering {
         log: (String) -> Unit,
     ): Result {
         // tianwen | A separately managed factory AP must not be replaced by Android tethering
-        // or an ADB fallback. The existing manual manager reads its state and verifies its route.
-        if (EcarxHotspotReader.available(context) && CarHotspotStatus.androidEnabled(context) != true) {
+        // or an ADB fallback. Exception: KX11_A2 uses Android native hotspot (uap0) via CarHotspotStartMain.
+        if (EcarxHotspotReader.available(context) &&
+            CarHotspotStatus.androidEnabled(context) != true &&
+            !CarHotspotSettings.isKx11A2()
+        ) {
             return (if (isCancelled()) Result.CANCELLED else Result.UNSUPPORTED).also {
                 log("car hotspot auto-enable: factory AP remains owned by the car settings")
             }

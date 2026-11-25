@@ -24,11 +24,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 class LocalAdb(
     private val key: KeyPair,
     private val host: String = "127.0.0.1",
-    private val port: Int = 5555,
+    private val port: Int = DEFAULT_PORT,
+    private val fallbackPorts: IntArray = if (port == DEFAULT_PORT) intArrayOf(KX11_PORT) else intArrayOf(),
 ) : Closeable {
     enum class Access { READY, NOT_APPROVED, UNREACHABLE, UNSUPPORTED }
 
     @Volatile private var socket: Socket? = null
+    @Volatile private var activePort: Int = port
     private val cancelled = AtomicBoolean(false)
     private var input: InputStream? = null
     private var output: OutputStream? = null
@@ -38,8 +40,23 @@ class LocalAdb(
     fun connect(mayAsk: Boolean): Access {
         if (cancelled.get()) return Access.UNREACHABLE
         if (socket?.isClosed == false) return Access.READY
+        val candidates = intArrayOf(port) + fallbackPorts
+        var lastResult = Access.UNREACHABLE
+        for (candidate in candidates) {
+            if (cancelled.get()) return Access.UNREACHABLE
+            val result = connectToPort(candidate, mayAsk)
+            if (result != Access.UNREACHABLE) {
+                activePort = candidate
+                return result
+            }
+            lastResult = result
+        }
+        return lastResult
+    }
+
+    private fun connectToPort(targetPort: Int, mayAsk: Boolean): Access {
         return try {
-            val address = InetSocketAddress(host, port)
+            val address = InetSocketAddress(host, targetPort)
             val opened = Socket().also { socket = it }.apply {
                 if (cancelled.get()) throw IOException("ADB operation cancelled")
                 connect(address, CONNECT_TIMEOUT_MS)
@@ -47,6 +64,7 @@ class LocalAdb(
                 tcpNoDelay = true
             }
             socket = opened
+            activePort = targetPort
             input = BufferedInputStream(opened.getInputStream())
             output = opened.getOutputStream()
             send(AdbPacket(AdbPacket.CNXN, AdbPacket.VERSION, AdbPacket.MAX_PAYLOAD, "host::\u0000".toByteArray()))
@@ -230,7 +248,7 @@ class LocalAdb(
                 } catch (_: SocketTimeoutException) {
                     pendingInput.reset()
                     // 部分车机保存了授权密钥，却不唤醒原连接；只用已保存的密钥检查，不再弹窗。
-                    val approved = LocalAdb(key, host, port).use { it.connect(mayAsk = false) == Access.READY }
+                    val approved = LocalAdb(key, host, activePort, intArrayOf()).use { it.connect(mayAsk = false) == Access.READY }
                     if (approved) {
                         closeQuietly()
                         return connect(mayAsk = false)
@@ -260,6 +278,9 @@ class LocalAdb(
     }
 
     internal companion object {
+        const val DEFAULT_PORT = 5555
+        /** Geely KX11_A2 listens on 7777 once persist.adb.local_init=local_init_enable is set. */
+        const val KX11_PORT = 7777
         const val CONNECT_TIMEOUT_MS = 2_000
         const val READ_TIMEOUT_MS = 5_000
         /** How long an asking connect waits for the driver to approve DiPlay on the car's screen. */
