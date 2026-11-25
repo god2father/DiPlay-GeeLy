@@ -319,10 +319,12 @@ internal class BridgeCore(val context: android.content.Context) : Closeable {
             "com.shihab.diplay" to setOf(
                 "a15b2614949476c254d9532140ae1cd54455d32681d3ca7340efbac6ea8d0cc7",
                 "bd9a50e56cedeca2404449a17f1e8dced22e0089eb912304f658edd57d5dd499",
+                "d900f3ebe6af350532ef13b907c496abb93851d0288986a677167bf17094748d",
             ),
             "com.shihab.diplay.hudtest" to setOf(
                 "a15b2614949476c254d9532140ae1cd54455d32681d3ca7340efbac6ea8d0cc7",
                 "bd9a50e56cedeca2404449a17f1e8dced22e0089eb912304f658edd57d5dd499",
+                "d900f3ebe6af350532ef13b907c496abb93851d0288986a677167bf17094748d",
             ),
             "com.shilapi.xcertplay" to setOf(
                 "29b48b0183c12406637892204402e71302d676bf6279ff9e2fd2c83aaa4174ec",

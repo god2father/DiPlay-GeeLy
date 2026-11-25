@@ -1,0 +1,100 @@
+name: Build custom DiPlay
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: '构建类型：debug = hudtest 包名，可与官方版共存；release = 正式包名，会替换官方版'
+        required: true
+        default: debug
+        type: choice
+        options:
+          - debug
+          - release
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      MFI_IDENTITY_PK8_B64: ${{ secrets.MFI_IDENTITY_PK8_B64 }}
+      MFI_CERT_P7B_B64: ${{ secrets.MFI_CERT_P7B_B64 }}
+      KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reject credential files in source
+        run: python3 scripts/check_public_tree.py
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-37.0 build-tools;36.0.0 ndk;28.2.13676358
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Provision CarPlay identity from secrets
+        run: |
+          set -euo pipefail
+          missing=""
+          for name in MFI_IDENTITY_PK8_B64 MFI_CERT_P7B_B64; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::缺少仓库 Secrets:$missing"
+            exit 1
+          fi
+          install -d "$RUNNER_TEMP/auth/offline-mfi"
+          printf '%s' "$MFI_IDENTITY_PK8_B64" | base64 -d > "$RUNNER_TEMP/auth/offline-mfi/identity.pk8"
+          printf '%s' "$MFI_CERT_P7B_B64" | base64 -d > "$RUNNER_TEMP/auth/offline-mfi/certificate.p7b"
+          test -s "$RUNNER_TEMP/auth/offline-mfi/identity.pk8"
+          test -s "$RUNNER_TEMP/auth/offline-mfi/certificate.p7b"
+          echo "DIPLAY_AUTH_ASSETS_DIR=$RUNNER_TEMP/auth" >> "$GITHUB_ENV"
+
+      - name: Provision signing key (release only)
+        if: inputs.variant == 'release'
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "::error::release 构建需要 Secret: KEYSTORE_B64（以及 KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD）"
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/release.jks"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$keystore"
+          test -s "$keystore"
+          echo "ANDROID_KEYSTORE_PATH=$keystore" >> "$GITHUB_ENV"
+
+      - name: Build debug (coexist with official app)
+        if: inputs.variant == 'debug'
+        run: ./gradlew :mobile:assembleStandaloneDebug :vehicle-bridge:assembleDebug --stacktrace
+
+      - name: Build release (replace official app)
+        if: inputs.variant == 'release'
+        run: ./gradlew :mobile:assembleRelease :vehicle-bridge:assembleRelease --stacktrace
+
+      - name: Verify identity bundled in APK
+        run: |
+          set -euo pipefail
+          apk=$(ls mobile/build/outputs/apk/${{ inputs.variant }}/*.apk | head -1)
+          echo "检查: $apk"
+          unzip -l "$apk" | grep 'assets/offline-mfi/identity.pk8'
+          unzip -l "$apk" | grep 'assets/offline-mfi/certificate.p7b'
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-diplay-${{ inputs.variant }}
+          path: |
+            mobile/build/outputs/apk/${{ inputs.variant }}/*.apk
+            vehicle-bridge/build/outputs/apk/${{ inputs.variant }}/*.apk
+          if-no-files-found: error
