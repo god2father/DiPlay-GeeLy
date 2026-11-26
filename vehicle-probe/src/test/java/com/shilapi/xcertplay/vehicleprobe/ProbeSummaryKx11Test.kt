@@ -36,8 +36,8 @@ class ProbeSummaryKx11Test {
         val bindings = ReportPropertyImporter.extract(kx11Report)
         val fields = bindings.map { it.field }.toSet()
         assertTrue(VehicleField.RANGE in fields)
-        assertTrue(VehicleField.OUTSIDE_TEMP in fields)
-        assertTrue(VehicleField.CABIN_TEMP in fields)
+        assertTrue(VehicleField.AMBIENT_TEMPERATURE in fields)
+        assertTrue(VehicleField.CABIN_TEMPERATURE in fields)
         assertTrue(VehicleField.SPEED in fields)
     }
 }
