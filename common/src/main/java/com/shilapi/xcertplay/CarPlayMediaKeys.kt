@@ -71,6 +71,7 @@ internal object CarPlayMediaKeys {
     private var coordinatorOwnsAudioFocus = false
     private var permanentFocusLost = false
     private var hostResumed = false
+    private var resumedHostOwner: Any? = null
     /** Some car firmware never sends a gain callback after the phone call ends. */
     private var transientFocusInterrupted = false
     private var manageAudioFocus = true
@@ -206,11 +207,19 @@ internal object CarPlayMediaKeys {
         }
     }
 
-    /** Tracks whether CarPlayHostActivity is currently resumed in the foreground. */
-    fun onHostResumedChanged(resumed: Boolean) {
+    /** Tracks whether CarPlayHostActivity is currently resumed in the foreground, scoped by host instance. */
+    fun onHostResumedChanged(owner: Any, resumed: Boolean) {
         synchronized(this) {
-            if (hostResumed == resumed) return
-            hostResumed = resumed
+            if (resumed) {
+                resumedHostOwner = owner
+                if (hostResumed) return
+                hostResumed = true
+            } else {
+                if (resumedHostOwner !== owner) return
+                resumedHostOwner = null
+                if (!hostResumed) return
+                hostResumed = false
+            }
             if (controller != null) syncGeelyInputLocked()
         }
     }
@@ -956,7 +965,10 @@ internal object CarPlayMediaKeys {
     }
 
     /** A steering-wheel media key captured outside the Android key stream (Geely/Lynk). */
-    internal fun onExternalMediaKey(index: Int) = send(index, "geely-wheel")
+    internal fun onExternalMediaKey(index: Int) {
+        if (!synchronized(this) { shouldInterceptMediaKeysLocked() }) return
+        send(index, "geely-wheel")
+    }
 
     /** The steering-wheel microphone key captured outside the Android key stream (Geely/Lynk). */
     internal fun onExternalSiriKey(): Boolean {

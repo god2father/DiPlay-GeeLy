@@ -244,7 +244,12 @@ class Kx11WakeGuardService : Service() {
         }
         val delayMs = bootLaunchDelayMs(SystemClock.uptimeMillis())
         Log.i(TAG, "Boot wake ($source): bringing up hotspot and launching DiPlay in ${delayMs}ms")
-        if (CarHotspotSettings.enabled(app)) {
+        if (CarHotspotSettings.shouldEnable(
+                app,
+                AirPlayPersistence.loadWirelessEnabled(app),
+                AirPlayPersistence.loadWirelessHotspotMode(app),
+            )
+        ) {
             worker.execute {
                 val first = runHotspotEnable(app, "boot-$source")
                 if (first != CarHotspotTethering.Result.READY && !worker.isShutdown) {
@@ -300,7 +305,12 @@ class Kx11WakeGuardService : Service() {
         }
         Log.i(TAG, "STR wake detected ($source); starting hotspot and DiPlay")
         val app = applicationContext
-        if (CarHotspotSettings.enabled(app)) {
+        if (CarHotspotSettings.shouldEnable(
+                app,
+                AirPlayPersistence.loadWirelessEnabled(app),
+                AirPlayPersistence.loadWirelessHotspotMode(app),
+            )
+        ) {
             worker.execute {
                 val result = runCatching {
                     CarHotspotTethering.enable(

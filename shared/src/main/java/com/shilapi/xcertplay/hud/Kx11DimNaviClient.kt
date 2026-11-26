@@ -348,6 +348,7 @@ object Kx11DimNaviBridge {
             if (Kx11DimSettings.naviHudEnabled(app)) {
                 bindLocked(app)
             }
+            Kx11DimMenuController.warmup(app)
         }
     }
 

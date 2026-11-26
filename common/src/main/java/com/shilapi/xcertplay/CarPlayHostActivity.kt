@@ -1222,7 +1222,7 @@ open class CarPlayHostActivity : ComponentActivity() {
         super.onResume()
         WheelKeyService.restoreIfNeeded(this)
         hostAppearanceResumed = true
-        CarPlayMediaKeys.onHostResumedChanged(true)
+        CarPlayMediaKeys.onHostResumedChanged(this, true)
         updateCallPopupGuard()
         val savedNightMode = AirPlayPersistence.loadCarPlayNightMode(this)
         val savedThreshold = AirPlayPersistence.loadAmbientLightThreshold(this)
@@ -1908,7 +1908,7 @@ open class CarPlayHostActivity : ComponentActivity() {
     override fun onPause() {
         cancelTemporarySystemBars()
         hostAppearanceResumed = false
-        CarPlayMediaKeys.onHostResumedChanged(false)
+        CarPlayMediaKeys.onHostResumedChanged(this, false)
         updateCallPopupGuard()
         AppAppearanceRuntime.clearHost(this)
         nightModeController.pause()
@@ -2032,7 +2032,7 @@ open class CarPlayHostActivity : ComponentActivity() {
         resetSidePanel()
         releaseSidePanelEffects()
         hostAppearanceResumed = false
-        CarPlayMediaKeys.onHostResumedChanged(false)
+        CarPlayMediaKeys.onHostResumedChanged(this, false)
         updateCallPopupGuard()
         AppAppearanceRuntime.clearHost(this)
         nightModeController.pause()

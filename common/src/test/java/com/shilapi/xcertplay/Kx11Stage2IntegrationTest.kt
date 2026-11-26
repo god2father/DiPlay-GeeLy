@@ -103,6 +103,18 @@ class Kx11Stage2IntegrationTest {
             sharedManifest.contains("com.autolink.diminteraction"),
         )
         assertTrue(
+            "shared manifest must query com.geely.dimservice for DimMenuInteraction visibility",
+            sharedManifest.contains("com.geely.dimservice"),
+        )
+        assertTrue(
+            "shared manifest must query com.ecarx.car for AdaptAPI visibility",
+            sharedManifest.contains("com.ecarx.car"),
+        )
+        assertTrue(
+            "shared manifest must query GEELY_DIM_MENU_SERVICE action",
+            sharedManifest.contains("android.intent.action.GEELY_DIM_MENU_SERVICE"),
+        )
+        assertTrue(
             "common manifest must declare Kx11ArtworkProvider",
             commonManifest.contains("com.shilapi.xcertplay.Kx11ArtworkProvider"),
         )

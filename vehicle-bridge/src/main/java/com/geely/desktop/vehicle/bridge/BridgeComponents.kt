@@ -28,10 +28,10 @@ class BridgeBootReceiver : BroadcastReceiver() {
         Thread {
             try {
                 val app = context.applicationContext
-                SelfGrant.restore(app)
                 if (action == Intent.ACTION_BOOT_COMPLETED) {
                     Kx11ClientBootWake.triggerIfNeeded(app)
                 }
+                SelfGrant.restore(app)
             } finally {
                 pending.finish()
             }
