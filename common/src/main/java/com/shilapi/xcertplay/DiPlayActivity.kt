@@ -2261,6 +2261,14 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     com.shilapi.xcertplay.hud.Kx11DimSettings.setClusterMediaEnabled(this, enabled)
                     com.shilapi.xcertplay.hud.Kx11DimMediaBridge.settingChanged(this, enabled)
                 }
+                toggle(
+                    card,
+                    getString(R.string.kx11_no_duck_music_title),
+                    getString(R.string.kx11_no_duck_music_description),
+                    com.shilapi.xcertplay.hud.Kx11DimSettings.noDuckMusicEnabled(this),
+                ) { enabled ->
+                    com.shilapi.xcertplay.hud.Kx11DimSettings.setNoDuckMusicEnabled(this, enabled)
+                }
             }
             toggle(
                 card,

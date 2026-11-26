@@ -23,6 +23,7 @@ import com.shilapi.xcertplay.hud.Kx11DimSettings
 import com.shilapi.xcertplay.network.CarHotspotSettings
 import com.shilapi.xcertplay.network.CarHotspotTethering
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Pure, permission-free detector that distinguishes genuine Suspend-to-RAM (STR) vehicle wakes
@@ -174,6 +175,9 @@ class Kx11WakeGuardService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_BOOT_WAKE) {
+            handleBootWake(intent.getStringExtra(EXTRA_WAKE_SOURCE) ?: "boot")
+        }
         return START_STICKY
     }
 
@@ -227,6 +231,59 @@ class Kx11WakeGuardService : Service() {
         }
     }
 
+    private fun handleBootWake(source: String) {
+        if (!bootWakeHandled.compareAndSet(false, true)) {
+            Log.d(TAG, "Boot wake already handled in this process (source=$source)")
+            return
+        }
+        val app = applicationContext
+        StartupDiagnosticSnapshot.received(app, true)
+        if (CarPlayBackgroundSession.hasSession()) {
+            Log.i(TAG, "Boot wake ($source) skipped: CarPlay session is already active")
+            return
+        }
+        val delayMs = bootLaunchDelayMs(SystemClock.uptimeMillis())
+        Log.i(TAG, "Boot wake ($source): bringing up hotspot and launching DiPlay in ${delayMs}ms")
+        if (CarHotspotSettings.enabled(app)) {
+            worker.execute {
+                val first = runHotspotEnable(app, "boot-$source")
+                if (first != CarHotspotTethering.Result.READY && !worker.isShutdown) {
+                    try {
+                        Thread.sleep(BOOT_HOTSPOT_RETRY_DELAY_MS)
+                    } catch (_: InterruptedException) {
+                        return@execute
+                    }
+                    runHotspotEnable(app, "boot-$source-retry")
+                }
+            }
+        }
+        mainHandler.postDelayed({
+            if (!shouldRun(app) || CarPlayBackgroundSession.hasSession()) return@postDelayed
+            try {
+                app.startActivity(buildLaunchIntent(app))
+                StartupDiagnosticSnapshot.launchResult(app)
+                Log.i(TAG, "Boot wake ($source) launched DiPlayActivity")
+            } catch (error: RuntimeException) {
+                StartupDiagnosticSnapshot.launchResult(app, error)
+                Log.w(TAG, "Boot wake ($source) could not launch DiPlayActivity", error)
+            }
+        }, delayMs)
+    }
+
+    private fun runHotspotEnable(app: Context, label: String): CarHotspotTethering.Result? {
+        val result = runCatching {
+            CarHotspotTethering.enable(
+                context = app,
+                isCancelled = { false },
+                log = { msg -> Log.i(TAG, msg) },
+            )
+        }.onFailure {
+            Log.w(TAG, "$label hotspot start threw: ${it.javaClass.simpleName}")
+        }.getOrNull()
+        Log.i(TAG, "$label hotspot result=$result")
+        return result
+    }
+
     private fun handlePotentialWake(source: String) {
         val decision = detector.onScreenWake(SystemClock.elapsedRealtime(), SystemClock.uptimeMillis())
         if (decision != Kx11StrWakeDetector.Decision.STR_WAKE) {
@@ -272,9 +329,38 @@ class Kx11WakeGuardService : Service() {
         private const val TAG = "DiPlay-KX11Wake"
         private const val CHANNEL_ID = "diplay_kx11_wake_guard"
         private const val NOTIFICATION_ID = 2
+        const val ACTION_BOOT_WAKE = "com.shihab.diplay.ACTION_KX11_BOOT_WAKE"
+        const val EXTRA_WAKE_SOURCE = "wake_source"
+        private const val EARLY_BOOT_UPTIME_MS = 45_000L
+        private const val EARLY_BOOT_LAUNCH_DELAY_MS = 6_000L
+        private const val WARM_BOOT_LAUNCH_DELAY_MS = 1_500L
+        private const val BOOT_HOTSPOT_RETRY_DELAY_MS = 5_000L
+
+        internal val bootWakeHandled = AtomicBoolean(false)
+
+        internal fun bootLaunchDelayMs(uptimeMs: Long): Long =
+            if (uptimeMs < EARLY_BOOT_UPTIME_MS) EARLY_BOOT_LAUNCH_DELAY_MS else WARM_BOOT_LAUNCH_DELAY_MS
 
         internal fun shouldRun(context: Context, model: String = Build.MODEL ?: ""): Boolean =
             Kx11DimSettings.isSupported(model) && AirPlayPersistence.loadAutoStartOnBoot(context)
+
+        fun triggerBootWake(context: Context, source: String = "BootReceiver") {
+            val app = context.applicationContext
+            if (!shouldRun(app)) return
+            val intent = Intent(app, Kx11WakeGuardService::class.java).apply {
+                action = ACTION_BOOT_WAKE
+                putExtra(EXTRA_WAKE_SOURCE, source)
+            }
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    app.startForegroundService(intent)
+                } else {
+                    app.startService(intent)
+                }
+            }.onFailure {
+                Log.w(TAG, "Could not trigger boot wake ($source): ${it.javaClass.simpleName}: ${it.message}")
+            }
+        }
 
         internal fun buildLaunchIntent(context: Context): Intent =
             Intent(context, DiPlayActivity::class.java).apply {

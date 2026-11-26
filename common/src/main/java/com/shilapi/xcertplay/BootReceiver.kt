@@ -19,6 +19,13 @@ class BootReceiver : BroadcastReceiver() {
         StartupDiagnosticSnapshot.received(context, launchEnabled)
         if (!launchEnabled) return
 
+        // On KX11_A2, delegate cold-boot launch through Kx11WakeGuardService so the car hotspot
+        // (uap0) is brought up in the background and DiPlayActivity waits for the launcher.
+        if (Kx11WakeGuardService.shouldRun(context)) {
+            Kx11WakeGuardService.triggerBootWake(context)
+            return
+        }
+
         // Shaped like the launcher icon's intent: a USB authenticator or iPhone plugged in can open CarPlay
         // before this broadcast, and DiPlayActivity then returns to that session instead of showing Home over it.
         val launch = Intent(context, DiPlayActivity::class.java).apply {

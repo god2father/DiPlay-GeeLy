@@ -1222,6 +1222,7 @@ open class CarPlayHostActivity : ComponentActivity() {
         super.onResume()
         WheelKeyService.restoreIfNeeded(this)
         hostAppearanceResumed = true
+        CarPlayMediaKeys.onHostResumedChanged(true)
         updateCallPopupGuard()
         val savedNightMode = AirPlayPersistence.loadCarPlayNightMode(this)
         val savedThreshold = AirPlayPersistence.loadAmbientLightThreshold(this)
@@ -1907,6 +1908,7 @@ open class CarPlayHostActivity : ComponentActivity() {
     override fun onPause() {
         cancelTemporarySystemBars()
         hostAppearanceResumed = false
+        CarPlayMediaKeys.onHostResumedChanged(false)
         updateCallPopupGuard()
         AppAppearanceRuntime.clearHost(this)
         nightModeController.pause()
@@ -2030,6 +2032,7 @@ open class CarPlayHostActivity : ComponentActivity() {
         resetSidePanel()
         releaseSidePanelEffects()
         hostAppearanceResumed = false
+        CarPlayMediaKeys.onHostResumedChanged(false)
         updateCallPopupGuard()
         AppAppearanceRuntime.clearHost(this)
         nightModeController.pause()
@@ -5415,6 +5418,7 @@ open class CarPlayHostActivity : ComponentActivity() {
             vendorLowLatencyDecoder = AirPlayPersistence.loadLowLatencyDecoder(this),
             mtkDecoderTuningEnabled = AirPlayPersistence.loadMtkDecoderTuning(this),
             navigationPromptAudioFocus = AirPlayPersistence.loadNavigationPromptAudioFocus(this),
+            duckMusicOnTransientDuck = !com.shilapi.xcertplay.hud.Kx11DimSettings.noDuckMusicEnabled(this),
         )
     }
 
@@ -5629,7 +5633,13 @@ open class CarPlayHostActivity : ComponentActivity() {
         controller = snapshot.controller
         updateClusterMapShown()
         sink = snapshot.sink
-        snapshot.sink.setAudioOwnershipChangedListener(snapshot.controller::setBluetoothAudioOwnership)
+        snapshot.sink.setAudioOwnershipChangedListener { owned ->
+            snapshot.controller.setBluetoothAudioOwnership(owned)
+            CarPlayMediaKeys.onAudioOwnershipChanged(snapshot.controller, owned)
+        }
+        snapshot.sink.setPermanentAudioFocusLossListener {
+            CarPlayMediaKeys.onPermanentAudioFocusLost(snapshot.controller)
+        }
         sessionDisplay = snapshot.display
         // The hotspot came up under the host that started this session; the menu keeps naming it.
         CarPlayBackgroundSession.hotspotReady?.let {
@@ -5800,7 +5810,13 @@ open class CarPlayHostActivity : ComponentActivity() {
             },
         )
         controller = next
-        renderer.setAudioOwnershipChangedListener(next::setBluetoothAudioOwnership)
+        renderer.setAudioOwnershipChangedListener { owned ->
+            next.setBluetoothAudioOwnership(owned)
+            CarPlayMediaKeys.onAudioOwnershipChanged(next, owned)
+        }
+        renderer.setPermanentAudioFocusLossListener {
+            CarPlayMediaKeys.onPermanentAudioFocusLost(next)
+        }
         resetSidePanel() // a new session starts without the side panel
         updateClusterMapShown()
         next.setHudNavigationListener(GeelyHudProjection::update)

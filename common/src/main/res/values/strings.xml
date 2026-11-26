@@ -1061,6 +1061,8 @@
     <string name="kx11_dim_navi_hud_description">Send CarPlay turns, next road, distance, ETA and lane guidance directly to the factory AR-HUD and instrument cluster without covering stock speed or ADAS graphics. Applies immediately.</string>
     <string name="kx11_dim_cluster_media_title">OEM cluster CarPlay music (KX11)</string>
     <string name="kx11_dim_cluster_media_description">Show CarPlay song title, artist, progress and album cover on the factory instrument cluster. Stops automatically when paused so stock car music apps stay unaffected. Applies immediately.</string>
+    <string name="kx11_no_duck_music_title">Keep music volume during guidance (KX11)</string>
+    <string name="kx11_no_duck_music_description">Ignore transient audio-focus duck requests from navigation or OEM alerts so CarPlay music stays at full volume. Applies at reconnect.</string>
     <string name="kx11_wake_guard_channel">Startup wake guard</string>
     <string name="kx11_wake_guard_running">Ready to auto-start CarPlay after sleep wake-up</string>
 </resources>

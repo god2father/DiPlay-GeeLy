@@ -20,6 +20,8 @@ internal class AudioFocusCoordinator(
     private val factoryRouting: Boolean = false,
     private val unifiedMediaOutput: Boolean = false,
     private val onOwnershipChanged: (Boolean) -> Unit = {},
+    private val onPermanentFocusLoss: () -> Unit = {},
+    private val duckMusicOnTransientDuck: Boolean = true,
 ) : Closeable {
     private data class Entry(val channel: AudioChannel, val attributes: AudioAttributes, var appliedVolume: Float = 1f) {
         val music = channel == AudioChannel.MEDIA && attributes.contentType != AudioAttributes.CONTENT_TYPE_SPEECH
@@ -58,32 +60,44 @@ internal class AudioFocusCoordinator(
         current.onAudioFocusChange(change)
     }
 
-    @Synchronized private fun onFocusChanged(generation: Int, change: Int) {
-        if (closed || !enabled || generation != requestGeneration || request == null || active.isEmpty() && captures.isEmpty()) {
-            // carlito | Explain discarded callbacks without changing the current focus owner.
-            runCatching { report("Audio: focus change=$change dropped stale=${generation != requestGeneration} noRequest=${request == null} activeTracks=${active.size}") }
-            return
-        }
-        runCatching { report("Audio: focus change=$change activeTracks=${active.size}") }
-        if (!vehicleRouting) {
-            when (change) {
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> focusVolume = DUCKED_VOLUME
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> if (muteMediaOnTransientLoss) focusVolume = 0f
-                AudioManager.AUDIOFOCUS_GAIN -> { focusHeld = true; focusVolume = 1f }
+    private fun onFocusChanged(generation: Int, change: Int) {
+        var notifyPermanentLoss = false
+        synchronized(this) {
+            if (closed || !enabled || generation != requestGeneration || request == null || active.isEmpty() && captures.isEmpty()) {
+                // carlito | Explain discarded callbacks without changing the current focus owner.
+                runCatching { report("Audio: focus change=$change dropped stale=${generation != requestGeneration} noRequest=${request == null} activeTracks=${active.size}") }
+                return
             }
-            applyVolumes()
-            return
-        }
-        when (change) {
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> focusVolume = DUCKED_VOLUME
-            AudioManager.AUDIOFOCUS_GAIN -> { focusHeld = true; focusVolume = 1f }
-            AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                focusHeld = false
-                if (change == AudioManager.AUDIOFOCUS_LOSS || muteMediaOnTransientLoss) focusVolume = 0f
-                if (change == AudioManager.AUDIOFOCUS_LOSS) mediaSuppressed = true
+            runCatching { report("Audio: focus change=$change activeTracks=${active.size}") }
+            if (!vehicleRouting) {
+                when (change) {
+                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> focusVolume = if (duckMusicOnTransientDuck) DUCKED_VOLUME else 1f
+                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> if (muteMediaOnTransientLoss) focusVolume = 0f
+                    AudioManager.AUDIOFOCUS_LOSS -> {
+                        focusHeld = false
+                        focusVolume = 0f
+                        notifyPermanentLoss = true
+                    }
+                    AudioManager.AUDIOFOCUS_GAIN -> { focusHeld = true; focusVolume = 1f }
+                }
+                applyVolumes()
+            } else {
+                when (change) {
+                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> focusVolume = if (duckMusicOnTransientDuck) DUCKED_VOLUME else 1f
+                    AudioManager.AUDIOFOCUS_GAIN -> { focusHeld = true; focusVolume = 1f }
+                    AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                        focusHeld = false
+                        if (change == AudioManager.AUDIOFOCUS_LOSS || muteMediaOnTransientLoss) focusVolume = 0f
+                        if (change == AudioManager.AUDIOFOCUS_LOSS) {
+                            mediaSuppressed = true
+                            notifyPermanentLoss = true
+                        }
+                    }
+                }
+                applyVolumes()
             }
         }
-        applyVolumes()
+        if (notifyPermanentLoss) runCatching { onPermanentFocusLoss() }
     }
 
     @Synchronized fun acquire(track: AudioTrack, channel: AudioChannel, attributes: AudioAttributes) {

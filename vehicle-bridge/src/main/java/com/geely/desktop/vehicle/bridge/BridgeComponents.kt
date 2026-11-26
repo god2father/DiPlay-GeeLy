@@ -3,10 +3,12 @@ package com.geely.desktop.vehicle.bridge
 
 import android.app.Service
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Binder
+import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import java.util.concurrent.TimeUnit
@@ -20,11 +22,16 @@ class VehicleBridgeService : Service() {
 
 class BridgeBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
-        if (intent?.action !in BOOT_ACTIONS) return
+        val action = intent?.action ?: return
+        if (action !in BOOT_ACTIONS) return
         val pending = goAsync()
         Thread {
             try {
-                SelfGrant.restore(context.applicationContext)
+                val app = context.applicationContext
+                SelfGrant.restore(app)
+                if (action == Intent.ACTION_BOOT_COMPLETED) {
+                    Kx11ClientBootWake.triggerIfNeeded(app)
+                }
             } finally {
                 pending.finish()
             }
@@ -37,6 +44,50 @@ class BridgeBootReceiver : BroadcastReceiver() {
             Intent.ACTION_LOCKED_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
         )
+    }
+}
+
+/**
+ * On KX11_A2, SystemUI force-stopping the DiPlay client leaves it in `stopped=true`, causing
+ * Android to skip `ACTION_BOOT_COMPLETED` for DiPlay on the next reboot. Because the headless
+ * vehicle bridge is never force-stopped by SystemUI (`stopped=false`), its boot receiver explicitly
+ * wakes DiPlay's signature-protected `Kx11WakeGuardService` to restore cold-boot auto-start.
+ */
+internal object Kx11ClientBootWake {
+    private const val TAG = "GD-Bridge-Boot"
+    private const val CLIENT_PACKAGE = "com.shihab.diplay"
+    private const val WAKE_SERVICE_CLASS = "com.shilapi.xcertplay.Kx11WakeGuardService"
+    private const val ACTION_KX11_BOOT_WAKE = "com.shihab.diplay.ACTION_KX11_BOOT_WAKE"
+    private const val EXTRA_WAKE_SOURCE = "wake_source"
+
+    fun isKx11A2(model: String = Build.MODEL ?: ""): Boolean =
+        model.trim().equals("KX11_A2", ignoreCase = true)
+
+    fun buildWakeIntent(): Intent = Intent(ACTION_KX11_BOOT_WAKE).apply {
+        component = ComponentName(CLIENT_PACKAGE, WAKE_SERVICE_CLASS)
+        addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+        putExtra(EXTRA_WAKE_SOURCE, "vehicle_bridge_boot")
+    }
+
+    fun triggerIfNeeded(context: Context, model: String = Build.MODEL ?: ""): Boolean {
+        if (!isKx11A2(model)) return false
+        val installed = runCatching {
+            context.packageManager.getPackageInfo(CLIENT_PACKAGE, 0)
+            true
+        }.getOrDefault(false)
+        if (!installed) return false
+        val intent = buildWakeIntent()
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            Log.i(TAG, "triggered KX11 cold-boot wake for $CLIENT_PACKAGE")
+            true
+        }.onFailure {
+            Log.w(TAG, "could not wake $CLIENT_PACKAGE on boot: ${it.javaClass.simpleName}: ${it.message}")
+        }.getOrDefault(false)
     }
 }
 
@@ -67,7 +118,7 @@ internal object SelfGrant {
         "android.permission.WRITE_SECURE_SETTINGS",
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
     )
-    private val APPOPS = listOf("RUN_IN_BACKGROUND", "ACTIVATE_VPN")
+    private val APPOPS = listOf("RUN_IN_BACKGROUND", "ACTIVATE_VPN", "SYSTEM_ALERT_WINDOW")
     val clientPackages = listOf("com.shihab.diplay", "com.shihab.diplay.hudtest")
 
     fun restore(context: Context) {

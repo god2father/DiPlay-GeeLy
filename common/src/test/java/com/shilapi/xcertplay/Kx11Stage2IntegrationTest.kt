@@ -110,6 +110,44 @@ class Kx11Stage2IntegrationTest {
             "BootReceiver must handle MY_PACKAGE_REPLACED for wake guard resurrection after update",
             commonManifest.contains("android.intent.action.MY_PACKAGE_REPLACED"),
         )
+        assertTrue(
+            "Kx11WakeGuardService must be protected by signature VEHICLE_BRIDGE permission when exported",
+            commonManifest.contains("android:permission=\"com.geely.desktop.permission.VEHICLE_BRIDGE\""),
+        )
+    }
+
+    @Test
+    fun geelyMediaKeyInterceptionRespectsPermanentFocusLossAndForegroundResumeGuard() {
+        // Normal playback or transient duck/interruption (permanentFocusLost=false) always keeps media keys.
+        assertTrue(CarPlayMediaKeys.shouldInterceptGeelyMediaKeys(permanentFocusLost = false, ownsAudioFocus = true, hostResumed = true, otherMusicActive = false))
+        assertTrue(CarPlayMediaKeys.shouldInterceptGeelyMediaKeys(permanentFocusLost = false, ownsAudioFocus = false, hostResumed = false, otherMusicActive = true))
+
+        // After permanent AUDIOFOCUS_LOSS (OEM NetEase playing): release wheel media keys even if in foreground.
+        assertFalse(CarPlayMediaKeys.shouldInterceptGeelyMediaKeys(permanentFocusLost = true, ownsAudioFocus = false, hostResumed = false, otherMusicActive = true))
+        assertFalse(CarPlayMediaKeys.shouldInterceptGeelyMediaKeys(permanentFocusLost = true, ownsAudioFocus = false, hostResumed = true, otherMusicActive = true))
+        assertFalse(CarPlayMediaKeys.shouldInterceptGeelyMediaKeys(permanentFocusLost = true, ownsAudioFocus = false, hostResumed = false, otherMusicActive = false))
+
+        // Deadlock guard: OEM music stopped and driver returned to CarPlay foreground -> allow play key to resume CarPlay.
+        assertTrue(CarPlayMediaKeys.shouldInterceptGeelyMediaKeys(permanentFocusLost = true, ownsAudioFocus = false, hostResumed = true, otherMusicActive = false))
+
+        // Regained audio focus -> always intercept media keys again.
+        assertTrue(CarPlayMediaKeys.shouldInterceptGeelyMediaKeys(permanentFocusLost = true, ownsAudioFocus = true, hostResumed = false, otherMusicActive = false))
+    }
+
+    @Test
+    fun filterGeelyBridgeKeysStripsMediaKeysWhileKeepingVoiceKey() {
+        val defaultKeys = intArrayOf(200085, 200087, 200088, 200231, 210005, 210006)
+        assertEquals(defaultKeys.toList(), CarPlayMediaKeys.filterGeelyBridgeKeys(defaultKeys, true).toList())
+        assertEquals(listOf(200231), CarPlayMediaKeys.filterGeelyBridgeKeys(defaultKeys, false).toList())
+        // Media-only custom profile drops to empty so updateBridgeKeys closes the bridge lease cleanly.
+        val mediaOnly = intArrayOf(200085, 200087, 200088)
+        assertTrue(CarPlayMediaKeys.filterGeelyBridgeKeys(mediaOnly, false).isEmpty())
+    }
+
+    @Test
+    fun bootWakeDelayWaitsLongerDuringEarlyBoot() {
+        assertEquals(6_000L, Kx11WakeGuardService.bootLaunchDelayMs(15_000L))
+        assertEquals(1_500L, Kx11WakeGuardService.bootLaunchDelayMs(60_000L))
     }
 
     private fun locateRepoRoot(): File {

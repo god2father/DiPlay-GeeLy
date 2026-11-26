@@ -90,7 +90,7 @@ internal object ReportPropertyImporter {
             if (row.size != 14 || row[8] != "READ_OK") return@forEach
             val chain = row[0]
             val kind = row[1]
-            if (chain !in setOf("adapt_api", "ecarx_service", "direct_binder") ||
+            if (chain !in setOf("adapt_api", "ecarx_service", "direct_binder", "gd_vehicle_bridge") ||
                 kind !in setOf("sensor", "signal", "property")) return@forEach
             val raw = row[7].toDoubleOrNull() ?: return@forEach
             if (!raw.isFinite() || (raw != 0.0 && abs(raw) < 1e-20)) return@forEach

@@ -83,6 +83,10 @@ jobs:
             --tests "com.shilapi.xcertplay.hud.Kx11DimNaviMapperTest" \
             --tests "com.shilapi.xcertplay.hud.Kx11DimNaviClientTest" \
             --tests "com.shilapi.xcertplay.hud.Kx11DimMediaClientTest" \
+            --tests "com.shilapi.xcertplay.media.AudioFocusPermanentLossTest" \
+            --stacktrace
+          ./gradlew :vehicle-probe:testDebugUnitTest \
+            --tests "com.shilapi.xcertplay.vehicleprobe.ProbeSummaryKx11Test" \
             --stacktrace
           ./gradlew :common:testDebugUnitTest \
             --tests "com.shilapi.xcertplay.GeelyClusterDisplayTest" \

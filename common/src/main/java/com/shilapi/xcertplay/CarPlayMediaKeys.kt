@@ -68,6 +68,9 @@ internal object CarPlayMediaKeys {
     private var focusOwner: Any? = null
     private var focusEventRevision = 0L
     private var focusHeld = false
+    private var coordinatorOwnsAudioFocus = false
+    private var permanentFocusLost = false
+    private var hostResumed = false
     /** Some car firmware never sends a gain callback after the phone call ends. */
     private var transientFocusInterrupted = false
     private var manageAudioFocus = true
@@ -165,6 +168,51 @@ internal object CarPlayMediaKeys {
     /** Called when CarPlay music starts or stops; may run on any thread. */
     fun onMediaAudioChanged(active: Boolean) {
         mainHandler.post { synchronized(this) { updateLocked(active) } }
+    }
+
+    /** Called by AudioFocusCoordinator when media audio focus ownership changes; may run on any thread. */
+    fun onAudioOwnershipChanged(expected: CarPlayController, owned: Boolean) {
+        mainHandler.post {
+            synchronized(this) {
+                if (controller !== expected) return@synchronized
+                coordinatorOwnsAudioFocus = owned
+                val restoredFromLoss = owned && permanentFocusLost
+                if (restoredFromLoss) permanentFocusLost = false
+                syncGeelyInputLocked()
+                if (restoredFromLoss) publishKx11ClusterMediaLocked()
+            }
+        }
+    }
+
+    /**
+     * Called by AudioFocusCoordinator on permanent AUDIOFOCUS_LOSS (e.g. OEM NetEase/radio took over).
+     * Sends discrete PAUSE to the iPhone, stops KX11 cluster playback heartbeats, and releases wheel
+     * media key interception so the OEM head unit owns play/pause and track keys cleanly.
+     */
+    fun onPermanentAudioFocusLost(expected: CarPlayController) {
+        mainHandler.post {
+            val target = synchronized(this) {
+                if (controller !== expected) return@post
+                coordinatorOwnsAudioFocus = false
+                permanentFocusLost = true
+                resumeAfterSpeech = false
+                Kx11DimMediaBridge.onSessionEnded()
+                syncGeelyInputLocked()
+                expected
+            }
+            val sent = target.sendMediaButton(CarPlayMediaButton.PAUSE)
+            Log.i(TAG, "permanent audio focus lost -> CarPlay PAUSE sent=$sent")
+            WheelKeyLog.note("permanent audio focus lost -> CarPlay PAUSE sent=$sent")
+        }
+    }
+
+    /** Tracks whether CarPlayHostActivity is currently resumed in the foreground. */
+    fun onHostResumedChanged(resumed: Boolean) {
+        synchronized(this) {
+            if (hostResumed == resumed) return
+            hostResumed = resumed
+            if (controller != null) syncGeelyInputLocked()
+        }
     }
 
     fun onSpeechPlayback(expected: CarPlayController, active: Boolean) {
@@ -371,13 +419,6 @@ internal object CarPlayMediaKeys {
             bridgeInput?.let { lastGeelyInputDiagnostics = it.diagnostics(); it.close() }
             bridgeInput = null
         } else {
-            if (bridgeInput == null) {
-                val generation = ++steeringGeneration
-                bridgeInput = VehicleSteeringClient(appContext!!) { event ->
-                    onGeelySteeringKey(GeelySteeringKeyEvent(event.getInt("keyCode"), event.getInt("rawKeyCode"),
-                        event.getInt("action"), event.getLong("eventTimeMs")), generation, source = "vehicle_bridge")
-                }
-            }
             bridgeBaseKeys = steeringProfile?.bindings?.filter { it.isVendorInput }
                 ?.map { GeelySteeringKeyCodes.canonicalize(it.keyCode) ?: it.keyCode }?.toIntArray()
                 ?: intArrayOf(200085, 200087, 200088, 200231, 210005, 210006)
@@ -429,6 +470,10 @@ internal object CarPlayMediaKeys {
             }
             if (steeringProfile?.bindings?.any { it.operation == operation } == true) {
                 noteBridgeEvent("$label -> dropped, $operation is bound to another key")
+                return@post
+            }
+            if (operation in setOf("play_pause", "next", "previous") && !shouldInterceptMediaKeysLocked()) {
+                noteBridgeEvent("$label -> dropped, native audio owns media keys")
                 return@post
             }
             val trigger = if (operation == "siri") event.action in 1..4 else event.action == 0 || event.action == 2
@@ -485,11 +530,49 @@ internal object CarPlayMediaKeys {
         if (bridgeZoomRoute() == null) endBridgeZoom()
         updateBridgeKeys()
     }
+    private fun shouldInterceptMediaKeysLocked(): Boolean {
+        val otherMusicActive = !coordinatorOwnsAudioFocus &&
+            (appContext?.getSystemService(AudioManager::class.java)?.isMusicActive == true)
+        return shouldInterceptGeelyMediaKeys(
+            permanentFocusLost = permanentFocusLost,
+            ownsAudioFocus = coordinatorOwnsAudioFocus || focusHeld,
+            hostResumed = hostResumed,
+            otherMusicActive = otherMusicActive,
+        )
+    }
+
     private fun updateBridgeKeys() {
         val route = bridgeZoomRoute()
         val mode = bridgeZoomKeys[WheelZoomSettings.Role.MODE]?.takeIf { route != null }
         val volume = if (zoomActive && route != null) bridgeZoomKeys.filterKeys { it != WheelZoomSettings.Role.MODE }.values else emptyList()
-        bridgeInput?.update(if (learning != null) intArrayOf() else (bridgeBaseKeys.toList() + listOfNotNull(mode) + volume).distinct().toIntArray(), learning == null)
+        val activeBaseKeys = if (learning != null) {
+            emptyList()
+        } else {
+            filterGeelyBridgeKeys(bridgeBaseKeys, shouldInterceptMediaKeysLocked()).toList()
+        }
+        val effectiveKeys = if (learning != null) {
+            intArrayOf()
+        } else {
+            (activeBaseKeys + listOfNotNull(mode) + volume).distinct().toIntArray()
+        }
+        if (learning == null && effectiveKeys.isEmpty()) {
+            // Release the bridge lease completely rather than calling update(empty, true) or intercept=false.
+            if (bridgeInput != null) {
+                steeringGeneration++
+                bridgeInput?.let { lastGeelyInputDiagnostics = it.diagnostics(); it.close() }
+                bridgeInput = null
+            }
+            return
+        }
+        val context = appContext ?: return
+        if (bridgeInput == null) {
+            val generation = ++steeringGeneration
+            bridgeInput = VehicleSteeringClient(context) { event ->
+                onGeelySteeringKey(GeelySteeringKeyEvent(event.getInt("keyCode"), event.getInt("rawKeyCode"),
+                    event.getInt("action"), event.getLong("eventTimeMs")), generation, source = "vehicle_bridge")
+            }
+        }
+        bridgeInput?.update(effectiveKeys, learning == null)
     }
     private fun endBridgeZoom() {
         if (zoomActive || bridgeZoom.zoomMode) zoomEpoch++
@@ -785,6 +868,8 @@ internal object CarPlayMediaKeys {
         focusRequest?.let { request -> appContext?.getSystemService(AudioManager::class.java)?.let(request::abandon) }
         focusRequest = null
         focusHeld = false
+        coordinatorOwnsAudioFocus = false
+        permanentFocusLost = false
         transientFocusInterrupted = false
         if (learning != null) syncGeelyInputLocked()
     }
@@ -813,6 +898,7 @@ internal object CarPlayMediaKeys {
     private fun publishKx11ClusterMediaLocked() {
         val context = appContext ?: return
         if (!Kx11DimSettings.isSupported()) return
+        if (permanentFocusLost) return
         val info = nowPlaying
         val updatedAt = elapsedUpdatedAt
         val audioActive = mediaAudioActive
@@ -984,6 +1070,30 @@ internal object CarPlayMediaKeys {
     private const val MAX_ARTWORK_DIMENSION = 384
     private const val MAX_ARTWORK_SOURCE_DIMENSION = 8_192
     private const val MAX_CACHED_ARTWORK = 4
+
+    internal val GEELY_MEDIA_KEY_CODES: Set<Int> = setOf(
+        GeelySteeringKeyCodes.MEDIA_PLAY_PAUSE,
+        GeelySteeringKeyCodes.MEDIA_NEXT,
+        GeelySteeringKeyCodes.MEDIA_PREVIOUS,
+        GeelySteeringKeyCodes.SEEK_NEXT,
+        GeelySteeringKeyCodes.SEEK_PREVIOUS,
+    )
+
+    /**
+     * Media-key interception policy for the Geely vehicle bridge:
+     * - Keep intercepting during normal CarPlay playback and transient ducks/interruptions.
+     * - After permanent AUDIOFOCUS_LOSS (OEM media took over), release wheel media keys unless
+     *   CarPlay regains audio focus or returns to foreground while no OEM music is playing.
+     */
+    internal fun shouldInterceptGeelyMediaKeys(
+        permanentFocusLost: Boolean,
+        ownsAudioFocus: Boolean,
+        hostResumed: Boolean,
+        otherMusicActive: Boolean,
+    ): Boolean = !permanentFocusLost || ownsAudioFocus || (hostResumed && !otherMusicActive)
+
+    internal fun filterGeelyBridgeKeys(baseKeys: IntArray, interceptMediaKeys: Boolean): IntArray =
+        if (interceptMediaKeys) baseKeys else baseKeys.filterNot { it in GEELY_MEDIA_KEY_CODES }.toIntArray()
 }
 
 /**

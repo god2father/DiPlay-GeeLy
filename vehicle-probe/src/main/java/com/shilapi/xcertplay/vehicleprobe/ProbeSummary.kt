@@ -12,7 +12,8 @@ internal data class ProbeSummary(val total: Int = 0, val readable: Int = 0, val 
             var readXui = 0
             var xuiRows = 0
             report.lineSequence().filter { it.startsWith("\"adapt_api\"") ||
-                it.startsWith("\"ecarx_service\"") || it.startsWith("\"direct_binder\"") }.forEach { line ->
+                it.startsWith("\"ecarx_service\"") || it.startsWith("\"direct_binder\"") ||
+                it.startsWith("\"gd_vehicle_bridge\"") }.forEach { line ->
                 val fields = csvFields(line)
                 if (fields.size >= 14) {
                     xuiRows++
@@ -36,8 +37,8 @@ internal data class ProbeSummary(val total: Int = 0, val readable: Int = 0, val 
                         .none(value::startsWith)
                 }
             }
-            val total = (xui?.groupValues?.get(2)?.toIntOrNull() ?: 0) +
-                (vhal?.groupValues?.get(1)?.toIntOrNull() ?: 0)
+            val xuiTotal = xui?.groupValues?.get(2)?.toIntOrNull() ?: xuiRows
+            val total = xuiTotal + (vhal?.groupValues?.get(1)?.toIntOrNull() ?: 0)
             val readable = (if (xuiRows > 0) readXui else xui?.groupValues?.get(1)?.toIntOrNull() ?: 0) + readVhal
             return ProbeSummary(total, readable.coerceAtMost(total), invalid.coerceAtMost(total))
         }

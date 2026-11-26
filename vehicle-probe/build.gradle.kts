@@ -1,7 +1,10 @@
 // tianwen | DiPlay property client; vehicle implementation is in a separate GD bridge APK.
 plugins { id("com.android.library") }
 
-dependencies { implementation(libs.androidx.core.ktx) }
+dependencies {
+    implementation(libs.androidx.core.ktx)
+    testImplementation(libs.junit)
+}
 
 android {
     namespace = "com.shilapi.xcertplay.vehicleprobe"

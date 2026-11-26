@@ -1018,6 +1018,8 @@
     <string name="kx11_dim_navi_hud_description">将 CarPlay 转向箭头、路口距离、下条路名、剩余时间及多车道引导线原生推送到原厂 AR-HUD 与液晶仪表，不遮挡原车车速、限速与智驾图标。立即生效。</string>
     <string name="kx11_dim_cluster_media_title">原厂仪表 CarPlay 音乐与封面（KX11）</string>
     <string name="kx11_dim_cluster_media_description">在原厂液晶仪表盘显示 CarPlay 歌名、歌手、进度与专辑封面；暂停或结束时自动停表，不抢占原车网易云等音乐卡片。立即生效。</string>
+    <string name="kx11_no_duck_music_title">导航/提示音不压低音乐（KX11）</string>
+    <string name="kx11_no_duck_music_description">导航播报或原车电子眼提示音触发临时降音时，保持 CarPlay 音乐满音量不衰减。重连 CarPlay 后生效。</string>
     <string name="kx11_wake_guard_channel">休眠唤醒自启守护</string>
     <string name="kx11_wake_guard_running">已就绪：休眠唤醒后自动开启热点并启动 DiPlay</string>
 </resources>

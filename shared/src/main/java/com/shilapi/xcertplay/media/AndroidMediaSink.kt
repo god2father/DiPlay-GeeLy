@@ -100,6 +100,8 @@ class AndroidMediaSink(
     private val mtkDecoderTuningEnabled: Boolean = false,
     /** Opt-in (#946): navigation prompts request duckable focus while the iPhone ducks audio. Needs [audioFocusEnabled]. */
     navigationPromptAudioFocus: Boolean = false,
+    /** When false, transient CAN_DUCK focus callbacks keep CarPlay music at full volume. */
+    duckMusicOnTransientDuck: Boolean = true,
 ) : MediaSink {
     // Each downlink publishes its own reference; a mic must match that stream and sample rate.
     private val callEchoReferences = ConcurrentHashMap<AudioStreamId, EchoReference>()
@@ -109,11 +111,15 @@ class AndroidMediaSink(
     private val ambientSinkToken = AmbientMusicController.openSink(appContext)
     private val audioManager = appContext?.getSystemService(AudioManager::class.java)
     @Volatile private var audioOwnershipListener: ((Boolean) -> Unit)? = onAudioOwnershipChanged
+    @Volatile private var permanentFocusLossListener: (() -> Unit)? = null
     @Volatile private var ownsAudio = false
     // carlito | Rebind the live controller when an Activity adopts a background session.
     fun setAudioOwnershipChangedListener(listener: ((Boolean) -> Unit)?) {
         audioOwnershipListener = listener
         listener?.invoke(ownsAudio)
+    }
+    fun setPermanentAudioFocusLossListener(listener: (() -> Unit)?) {
+        permanentFocusLossListener = listener
     }
     private val audioFocusCoordinator = AudioFocusCoordinator(
         appContext,
@@ -123,6 +129,8 @@ class AndroidMediaSink(
         factoryRouting = factoryAudio != null && !bluetoothOutput,
         unifiedMediaOutput = unifiedMediaOutput,
         onOwnershipChanged = { owned -> ownsAudio = owned; audioOwnershipListener?.invoke(owned) },
+        onPermanentFocusLoss = { permanentFocusLossListener?.invoke() },
+        duckMusicOnTransientDuck = duckMusicOnTransientDuck,
     )
 
     private val navigationPromptFocus = NavigationPromptFocus(
