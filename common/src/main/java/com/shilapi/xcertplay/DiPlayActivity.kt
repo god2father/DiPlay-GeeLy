@@ -406,6 +406,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         super.onCreate(savedInstanceState)
         // Run KX11 one-time safe projection defaults before any early launcher-session redirect.
         Kx11ProjectionDefaults.applyOnceIfNeeded(this)
+        Kx11WakeGuardService.sync(this)
         // Back on the home page finishes this activity while the session runs on, so the icon lands here.
         if (savedInstanceState == null && isLauncherIntent(intent) && CarPlayBackgroundSession.hasSession()) {
             openProjection(); finish(); return
@@ -1874,6 +1875,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL },
                 permissions = { listOf(CarHotspotSetup.Permission.BOOT_LAUNCH) }) {
                 AirPlayPersistence.saveAutoStartOnBoot(this, it)
+                Kx11WakeGuardService.sync(this)
             }
             val autoConfirmActive = UsbPermissionSetup.Permission.ACCESSIBILITY.granted(this)
             toggle(
@@ -2240,6 +2242,26 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
         filteredSection(content, SettingsSection.GEELY_NAVIGATION,
             getString(R.string.geely_vehicle), R.drawable.ic_dp_navigation) { card ->
+            if (com.shilapi.xcertplay.hud.Kx11DimSettings.isSupported()) {
+                toggle(
+                    card,
+                    getString(R.string.kx11_dim_navi_hud_title),
+                    getString(R.string.kx11_dim_navi_hud_description),
+                    com.shilapi.xcertplay.hud.Kx11DimSettings.naviHudEnabled(this),
+                ) { enabled ->
+                    com.shilapi.xcertplay.hud.Kx11DimSettings.setNaviHudEnabled(this, enabled)
+                    com.shilapi.xcertplay.hud.Kx11DimNaviBridge.settingChanged(this, enabled)
+                }
+                toggle(
+                    card,
+                    getString(R.string.kx11_dim_cluster_media_title),
+                    getString(R.string.kx11_dim_cluster_media_description),
+                    com.shilapi.xcertplay.hud.Kx11DimSettings.clusterMediaEnabled(this),
+                ) { enabled ->
+                    com.shilapi.xcertplay.hud.Kx11DimSettings.setClusterMediaEnabled(this, enabled)
+                    com.shilapi.xcertplay.hud.Kx11DimMediaBridge.settingChanged(this, enabled)
+                }
+            }
             toggle(
                 card,
                 getString(R.string.geely_hud_navigation),

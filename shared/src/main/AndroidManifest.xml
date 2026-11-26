@@ -32,6 +32,8 @@
     <queries>
         <!-- tianwen | Locate the installed factory SDK when it is bundled in Geely settings. -->
         <package android:name="com.geely.settings" />
+        <!-- KX11_A2 OEM DIM QNX cluster/HUD navigation and media interaction services. -->
+        <package android:name="com.autolink.diminteraction" />
         <package android:name="com.byd.carsettings" />
         <package android:name="com.byd.appmgr" />
         <package android:name="com.byd.deviceinfo" />

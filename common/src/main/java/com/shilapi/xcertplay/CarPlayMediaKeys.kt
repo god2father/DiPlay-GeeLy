@@ -22,6 +22,8 @@ import com.shilapi.xcertplay.airplay.CarPlayMediaButton
 import com.shilapi.xcertplay.compat.AudioFocusRequestCompat
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.hud.BydOutputSettings
+import com.shilapi.xcertplay.hud.Kx11DimMediaBridge
+import com.shilapi.xcertplay.hud.Kx11DimSettings
 import com.shilapi.xcertplay.media.CarPlayNowPlaying
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import com.shilapi.xcertplay.vehicle.GeelyFactoryCarPlay
@@ -113,6 +115,12 @@ internal object CarPlayMediaKeys {
     private var artwork: Bitmap? = null
     private val artworkCache = LinkedHashMap<Int, Bitmap?>()
     private var placeholder: Bitmap? = null
+    private val kx11ArtworkExecutor = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "diplay-kx11-artwork-share").apply { isDaemon = true }
+    }
+    private var kx11MediaGeneration = 0
+    private var lastKx11ArtworkRef: Bitmap? = null
+    private var lastKx11ArtworkUri: android.net.Uri? = null
 
     @Synchronized
     fun attach(context: Context, next: CarPlayController, manageAudioFocus: Boolean = true,
@@ -122,6 +130,7 @@ internal object CarPlayMediaKeys {
             artworkOwner = artworkQueue.newSession()
         }
         appContext = context.applicationContext
+        Kx11DimMediaBridge.initialize(context)
         controller = next
         GeelyWheelKeys.start(context)
         this.manageAudioFocus = manageAudioFocus
@@ -223,6 +232,7 @@ internal object CarPlayMediaKeys {
                 // minutes. The position goes in the playback state.
                 if (metadataChanged) session?.setMetadata(androidMetadata(update, shownArtworkLocked()))
                 publishPlaybackStateLocked()
+                publishKx11ClusterMediaLocked()
             }
         }
     }
@@ -259,6 +269,7 @@ internal object CarPlayMediaKeys {
             controller?.let { com.shilapi.xcertplay.media.AmbientMusicController.albumColorChanged(it, result?.color) }
             controller?.let(::updateInitialAlbumRecovery)
             session?.setMetadata(androidMetadata(nowPlaying, shownArtworkLocked()))
+            publishKx11ClusterMediaLocked()
         }
     }
 
@@ -268,6 +279,7 @@ internal object CarPlayMediaKeys {
     private fun albumRecoveryEnabled(): Boolean {
         val context = appContext ?: return false
         if (ClusterMusicSettings.enabled(context)) return true
+        if (Kx11DimSettings.clusterMediaEnabled(context)) return true
         val settings = com.shilapi.xcertplay.media.AmbientMusicSettings.load(context)
         return settings.enabled && settings.colorSource == com.shilapi.xcertplay.media.AmbientColorSource.ALBUM
     }
@@ -653,6 +665,7 @@ internal object CarPlayMediaKeys {
         mediaAudioActive = active
         if (active && session == null) start(context) else if (active) regainFocusLocked()
         publishPlaybackStateLocked()
+        publishKx11ClusterMediaLocked()
     }
 
     private fun start(context: Context) {
@@ -763,6 +776,11 @@ internal object CarPlayMediaKeys {
         nowPlaying = CarPlayNowPlaying()
         artwork = null
         artworkCache.clear()
+        kx11MediaGeneration++
+        lastKx11ArtworkRef = null
+        lastKx11ArtworkUri = null
+        Kx11DimMediaBridge.onSessionEnded()
+        appContext?.let { ctx -> kx11ArtworkExecutor.execute { Kx11ArtworkShare.clear(ctx) } }
         ClusterMusicState.publish(CarPlayNowPlaying(), null)
         focusRequest?.let { request -> appContext?.getSystemService(AudioManager::class.java)?.let(request::abandon) }
         focusRequest = null
@@ -790,6 +808,39 @@ internal object CarPlayMediaKeys {
                 )
                 .build(),
         )
+    }
+
+    private fun publishKx11ClusterMediaLocked() {
+        val context = appContext ?: return
+        if (!Kx11DimSettings.isSupported()) return
+        val info = nowPlaying
+        val updatedAt = elapsedUpdatedAt
+        val audioActive = mediaAudioActive
+        val currentArtwork = artwork
+        if (currentArtwork == null) {
+            lastKx11ArtworkRef = null
+            lastKx11ArtworkUri = null
+            Kx11DimMediaBridge.onMediaUpdated(info, updatedAt, null, audioActive)
+            return
+        }
+        if (currentArtwork === lastKx11ArtworkRef) {
+            Kx11DimMediaBridge.onMediaUpdated(info, updatedAt, lastKx11ArtworkUri, audioActive)
+            return
+        }
+        // Send track metadata promptly without stalling the main thread on JPEG compression.
+        Kx11DimMediaBridge.onMediaUpdated(info, updatedAt, null, audioActive)
+        val gen = kx11MediaGeneration
+        kx11ArtworkExecutor.execute {
+            val uri = Kx11ArtworkShare.publish(context, currentArtwork)
+            mainHandler.post {
+                synchronized(this@CarPlayMediaKeys) {
+                    if (kx11MediaGeneration != gen || artwork !== currentArtwork) return@post
+                    lastKx11ArtworkRef = currentArtwork
+                    lastKx11ArtworkUri = uri
+                    Kx11DimMediaBridge.onMediaUpdated(nowPlaying, elapsedUpdatedAt, uri, mediaAudioActive)
+                }
+            }
+        }
     }
 
     private fun send(index: Int, source: String) {

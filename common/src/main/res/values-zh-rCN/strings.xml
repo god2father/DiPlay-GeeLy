@@ -1014,4 +1014,10 @@
     <string name="cluster_projection_shape_description">半屏会在仪表盘地图旁保留仪表原本的车速与状态信息；全屏则让地图占满整个仪表盘。CarPlay 地图出现时 DiPlay 会设置该形态，否则会覆盖你在车机上选好的导航模式。需要车机已授权网络 ADB。</string>
     <string name="settings_cluster_speedometer_album_color">速度表背景使用专辑颜色</string>
     <string name="settings_cluster_speedometer_album_color_description">平滑过渡到专辑边框的颜色，并保留所选的不透明度。</string>
+    <string name="kx11_dim_navi_hud_title">原厂 HUD 与仪表原生导航（KX11）</string>
+    <string name="kx11_dim_navi_hud_description">将 CarPlay 转向箭头、路口距离、下条路名、剩余时间及多车道引导线原生推送到原厂 AR-HUD 与液晶仪表，不遮挡原车车速、限速与智驾图标。立即生效。</string>
+    <string name="kx11_dim_cluster_media_title">原厂仪表 CarPlay 音乐与封面（KX11）</string>
+    <string name="kx11_dim_cluster_media_description">在原厂液晶仪表盘显示 CarPlay 歌名、歌手、进度与专辑封面；暂停或结束时自动停表，不抢占原车网易云等音乐卡片。立即生效。</string>
+    <string name="kx11_wake_guard_channel">休眠唤醒自启守护</string>
+    <string name="kx11_wake_guard_running">已就绪：休眠唤醒后自动开启热点并启动 DiPlay</string>
 </resources>

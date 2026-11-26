@@ -113,9 +113,30 @@ class VehiclePropertiesService : Service() {
     }
 }
 
+/**
+ * Process-scoped holder for [PropertyReader] backed by [android.content.Context.getApplicationContext].
+ *
+ * OEM `Car.create(context)` binds 6+ internal autolink-adapter services without exposing an unbind
+ * API. Passing a short-lived `Service` context caused `ServiceConnectionLeaked` on every unbind.
+ */
+internal object SharedPropertyReader {
+    @Volatile private var instance: PropertyReader? = null
+
+    fun get(context: android.content.Context): PropertyReader {
+        val app = context.applicationContext ?: context
+        return instance ?: synchronized(this) {
+            instance ?: PropertyReader(app).also { instance = it }
+        }
+    }
+}
+
 /** Shared state for the binder: profile, reader, steering and projection. */
-internal class BridgeCore(val context: android.content.Context) : Closeable {
-    val reader = PropertyReader(context)
+internal class BridgeCore(
+    rawContext: android.content.Context,
+    val reader: PropertyReader = SharedPropertyReader.get(rawContext),
+    private val ownsReader: Boolean = false,
+) : Closeable {
+    val context: android.content.Context = rawContext.applicationContext ?: rawContext
     val steering = SteeringBridge(context)
     val projection = ProjectionLease()
 
@@ -306,7 +327,7 @@ internal class BridgeCore(val context: android.content.Context) : Closeable {
     }.getOrNull()
 
     override fun close() {
-        reader.close()
+        if (ownsReader) reader.close()
         steering.close()
         projection.close()
     }

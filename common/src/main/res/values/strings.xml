@@ -1057,4 +1057,10 @@
     <string name="cluster_projection_shape_description">Half screen keeps the speed and status readouts the cluster normally shows beside the map; full screen lets the map fill the cluster. DiPlay sets the shape whenever the CarPlay map appears, which otherwise overrides the shape picked on the car. Needs ADB over network on the head unit.</string>
     <string name="settings_cluster_speedometer_album_color">Use album color for speedometer background</string>
     <string name="settings_cluster_speedometer_album_color_description">Match the album frame color with smooth transitions. Keeps the selected opacity.</string>
+    <string name="kx11_dim_navi_hud_title">OEM HUD &amp; cluster navigation (KX11)</string>
+    <string name="kx11_dim_navi_hud_description">Send CarPlay turns, next road, distance, ETA and lane guidance directly to the factory AR-HUD and instrument cluster without covering stock speed or ADAS graphics. Applies immediately.</string>
+    <string name="kx11_dim_cluster_media_title">OEM cluster CarPlay music (KX11)</string>
+    <string name="kx11_dim_cluster_media_description">Show CarPlay song title, artist, progress and album cover on the factory instrument cluster. Stops automatically when paused so stock car music apps stay unaffected. Applies immediately.</string>
+    <string name="kx11_wake_guard_channel">Startup wake guard</string>
+    <string name="kx11_wake_guard_running">Ready to auto-start CarPlay after sleep wake-up</string>
 </resources>

@@ -3597,6 +3597,7 @@ open class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveManualHotspotInterface(this, manualHotspotInterface)
         AirPlayPersistence.saveLocationReportingEnabled(this, locationReportingEnabled)
         AirPlayPersistence.saveAutoStartOnBoot(this, autoStartOnBoot)
+        Kx11WakeGuardService.sync(this)
         AirPlayPersistence.saveAdvancedAudioChannelMapping(this, advancedAudioChannelMapping)
         AirPlayPersistence.saveDisplayScaleTenths(this, displayScaleTenths)
         AirPlayPersistence.saveDisplayScalePercent(this, displayScalePercent)

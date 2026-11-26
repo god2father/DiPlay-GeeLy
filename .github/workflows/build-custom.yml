@@ -76,8 +76,21 @@ jobs:
 
       - name: Run KX11 unit tests gate
         run: |
-          ./gradlew :shared:testDebugUnitTest --tests "com.shilapi.xcertplay.adb.LocalAdbTest" --tests "com.shilapi.xcertplay.network.CarHotspotAdbFallbackTest" --stacktrace
-          ./gradlew :common:testDebugUnitTest --tests "com.shilapi.xcertplay.GeelyClusterDisplayTest" --tests "com.shilapi.xcertplay.Kx11ProjectionDefaultsTest" --tests "com.shilapi.xcertplay.CarHotspotSwitchTest" --stacktrace
+          ./gradlew :shared:testDebugUnitTest \
+            --tests "com.shilapi.xcertplay.adb.LocalAdbTest" \
+            --tests "com.shilapi.xcertplay.network.CarHotspotAdbFallbackTest" \
+            --tests "com.shilapi.xcertplay.iap2.message.Iap2LaneGuidanceTest" \
+            --tests "com.shilapi.xcertplay.hud.Kx11DimNaviMapperTest" \
+            --tests "com.shilapi.xcertplay.hud.Kx11DimNaviClientTest" \
+            --tests "com.shilapi.xcertplay.hud.Kx11DimMediaClientTest" \
+            --stacktrace
+          ./gradlew :common:testDebugUnitTest \
+            --tests "com.shilapi.xcertplay.GeelyClusterDisplayTest" \
+            --tests "com.shilapi.xcertplay.Kx11ProjectionDefaultsTest" \
+            --tests "com.shilapi.xcertplay.CarHotspotSwitchTest" \
+            --tests "com.shilapi.xcertplay.SettingsLayoutSourceRulesTest" \
+            --tests "com.shilapi.xcertplay.Kx11Stage2IntegrationTest" \
+            --stacktrace
 
       - name: Build debug (coexist with official app)
         if: inputs.variant == 'debug'

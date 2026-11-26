@@ -77,6 +77,15 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/update_apk_paths" />
         </provider>
+        <provider
+            android:name="com.shilapi.xcertplay.Kx11ArtworkProvider"
+            android:authorities="${applicationId}.kx11-artwork"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/kx11_artwork_paths" />
+        </provider>
         <activity android:name="com.shilapi.xcertplay.DiPlayActivity"
             android:exported="true" android:launchMode="singleTop"
             android:resizeableActivity="true"
@@ -89,6 +98,8 @@
         </activity>
         <service android:name="com.shilapi.xcertplay.DiPlaySessionService"
             android:exported="false" android:foregroundServiceType="connectedDevice|microphone|location|mediaPlayback" />
+        <service android:name="com.shilapi.xcertplay.Kx11WakeGuardService"
+            android:exported="false" android:foregroundServiceType="connectedDevice" />
 
         <activity
             android:name="com.shilapi.xcertplay.CarPlayHostActivity"
@@ -195,6 +206,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

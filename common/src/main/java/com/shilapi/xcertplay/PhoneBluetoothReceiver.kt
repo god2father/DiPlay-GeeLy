@@ -13,6 +13,9 @@ import android.util.Log
 /** Optional DiLink wake-up path for the iPhone the user selected in connection setup. */
 class PhoneBluetoothReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == BluetoothDevice.ACTION_ACL_CONNECTED) {
+            Kx11WakeGuardService.sync(context)
+        }
         if (intent.action != BluetoothDevice.ACTION_ACL_CONNECTED ||
             !DiPlayPreferences.connectOnPhoneBluetooth(context) ||
             CarPlayBackgroundSession.hasSession()) return
