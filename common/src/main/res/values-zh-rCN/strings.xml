@@ -1020,6 +1020,8 @@
     <string name="kx11_dim_cluster_media_description">在原厂液晶仪表盘显示 CarPlay 歌名、歌手、进度与专辑封面；暂停或结束时自动停表，不抢占原车网易云等音乐卡片。立即生效。</string>
     <string name="kx11_no_duck_music_title">导航/提示音不压低音乐（KX11）</string>
     <string name="kx11_no_duck_music_description">导航播报或原车电子眼提示音触发临时降音时，保持 CarPlay 音乐满音量不衰减。重连 CarPlay 后生效。</string>
+    <string name="kx11_cluster_full_navi_title">仪表全屏导航画布联动（KX11 实验）</string>
+    <string name="kx11_cluster_full_navi_description">开启导航时单次调用原车仪表切换为全屏导航视图（保留左右圆表盘，不抢占左侧拨杆切油耗/胎压），导航结束或关闭开关自动还原。默认关闭。</string>
     <string name="kx11_wake_guard_channel">休眠唤醒自启守护</string>
     <string name="kx11_wake_guard_running">已就绪：休眠唤醒后自动开启热点并启动 DiPlay</string>
 </resources>

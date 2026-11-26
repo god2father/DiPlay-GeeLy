@@ -16,6 +16,7 @@ object Kx11DimSettings {
     private const val KEY_NAVI_HUD_ENABLED = "kx11_dim_navi_hud_enabled"
     private const val KEY_CLUSTER_MEDIA_ENABLED = "kx11_dim_cluster_media_enabled"
     private const val KEY_NO_DUCK_MUSIC_ENABLED = "kx11_no_duck_music_enabled"
+    private const val KEY_CLUSTER_FULL_NAVI_LAYOUT = "kx11_cluster_full_navi_layout"
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -48,5 +49,15 @@ object Kx11DimSettings {
 
     fun setNoDuckMusicEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_NO_DUCK_MUSIC_ENABLED, enabled).apply()
+    }
+
+    /** Experimental: edge-triggered switchNaviMode(3) when CarPlay guidance starts; off by default. */
+    fun clusterFullNaviLayoutEnabled(context: Context, model: String = Build.MODEL ?: ""): Boolean {
+        if (!isSupported(model)) return false
+        return prefs(context).getBoolean(KEY_CLUSTER_FULL_NAVI_LAYOUT, false)
+    }
+
+    fun setClusterFullNaviLayoutEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_CLUSTER_FULL_NAVI_LAYOUT, enabled).apply()
     }
 }

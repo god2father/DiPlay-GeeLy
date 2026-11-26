@@ -30,10 +30,14 @@ class Kx11Stage2IntegrationTest {
         assertTrue(Kx11DimSettings.isSupported("KX11_A2"))
         assertTrue(Kx11DimSettings.naviHudEnabled(app, model = "KX11_A2"))
         assertTrue(Kx11DimSettings.clusterMediaEnabled(app, model = "KX11_A2"))
+        assertTrue(Kx11DimSettings.noDuckMusicEnabled(app, model = "KX11_A2"))
+        assertFalse(Kx11DimSettings.clusterFullNaviLayoutEnabled(app, model = "KX11_A2"))
 
         assertFalse(Kx11DimSettings.isSupported("CS11_A4"))
         assertFalse(Kx11DimSettings.naviHudEnabled(app, model = "CS11_A4"))
         assertFalse(Kx11DimSettings.clusterMediaEnabled(app, model = "CS11_A4"))
+        assertFalse(Kx11DimSettings.noDuckMusicEnabled(app, model = "CS11_A4"))
+        assertFalse(Kx11DimSettings.clusterFullNaviLayoutEnabled(app, model = "CS11_A4"))
 
         // User opt-out is persisted and respected
         Kx11DimSettings.setNaviHudEnabled(app, false)

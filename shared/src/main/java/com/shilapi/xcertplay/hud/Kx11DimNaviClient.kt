@@ -109,6 +109,7 @@ internal class Kx11DimNaviPublisher(
     private val nanoTime: () -> Long = System::nanoTime,
     private val coalesceMs: Long = COALESCE_WINDOW_MS,
     private val statusRefreshMs: Long = STATUS_REFRESH_INTERVAL_MS,
+    private val onNaviActiveChanged: (Boolean) -> Unit = {},
 ) {
     private data class RenderedFrame(
         val turnId: Int,
@@ -188,6 +189,7 @@ internal class Kx11DimNaviPublisher(
             wasActive
         }
         if (!needDimReset) return
+        runCatching { onNaviActiveChanged(false) }
         val remote = binderProvider() ?: return
         runCatching {
             val api = Kx11DimNaviBinder(remote)
@@ -258,13 +260,16 @@ internal class Kx11DimNaviPublisher(
             api.updateLaneInfo(frameToEmit.lanes.takeIf { it.isNotEmpty() }?.toTypedArray())
             // Must be last: updateETA triggers DIMNaviInteractioncService's QNX FDBus transmission.
             api.updateETA(etaToSend)
+            var becameActive = false
             synchronized(lock) {
+                becameActive = !naviActiveOnDim
                 naviActiveOnDim = true
                 lastFrame = frameToEmit
                 lastTurnId = frameToEmit.turnId
                 lastSentEta = etaToSend
                 if (needStatusAssert) lastStatusSentMs = elapsedRealtimeMs()
             }
+            if (becameActive) runCatching { onNaviActiveChanged(true) }
         }.onFailure {
             Log.w(TAG, "emit failed: ${it.javaClass.simpleName}: ${it.message}")
         }
@@ -334,6 +339,9 @@ object Kx11DimNaviBridge {
                     binderProvider = ::ensureBinder,
                     scheduleDelayed = { delayMs, action -> handler.postDelayed(action, delayMs) },
                     cancelScheduled = { action -> handler.removeCallbacks(action) },
+                    onNaviActiveChanged = { active ->
+                        appContext?.let { Kx11DimMenuController.onNaviActiveChanged(it, active) }
+                    },
                 )
             }
             publisher?.setEnabled(Kx11DimSettings.naviHudEnabled(app))

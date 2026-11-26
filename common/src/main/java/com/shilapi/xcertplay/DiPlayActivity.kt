@@ -2269,6 +2269,15 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 ) { enabled ->
                     com.shilapi.xcertplay.hud.Kx11DimSettings.setNoDuckMusicEnabled(this, enabled)
                 }
+                toggle(
+                    card,
+                    getString(R.string.kx11_cluster_full_navi_title),
+                    getString(R.string.kx11_cluster_full_navi_description),
+                    com.shilapi.xcertplay.hud.Kx11DimSettings.clusterFullNaviLayoutEnabled(this),
+                ) { enabled ->
+                    com.shilapi.xcertplay.hud.Kx11DimSettings.setClusterFullNaviLayoutEnabled(this, enabled)
+                    com.shilapi.xcertplay.hud.Kx11DimMenuController.settingChanged(this, enabled)
+                }
             }
             toggle(
                 card,
