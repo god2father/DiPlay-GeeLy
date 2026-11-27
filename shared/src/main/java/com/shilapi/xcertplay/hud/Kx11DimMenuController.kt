@@ -3,30 +3,39 @@ package com.shilapi.xcertplay.hud
 import android.content.Context
 import android.util.Log
 import java.lang.reflect.Method
+import java.lang.reflect.Proxy
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 /**
  * Reflection-only controller for KX11_A2's built-in `ecarx.adaptapi.jar`
- * `DimMenuInteraction` / `DimInteraction` cluster layout APIs.
+ * `DimInteraction` / `DimMenuInteraction` cluster layout APIs.
  *
  * Design guards:
- * 1. Holds a single process-wide instance constructed with `applicationContext` to prevent
- *    ServiceConnection leaks, initialized off the main thread.
- * 2. Edge-triggered only: switches layout once when CarPlay navigation starts (with at most one
- *    300ms delayed retry if the underlying OEM Binder was still connecting) and NEVER loops or
- *    re-asserts, so pressing the left stalk button to view fuel consumption / TPMS stays untouched.
- * 3. Always restores `MODE_DEFAULT (1)` when navigation ends, CarPlay disconnects, or the user
- *    turns off the experimental toggle.
+ * 1. Holds a single process-wide `DimInteraction` / `DimMenuInteraction` instance created with
+ *    `applicationContext` (never calling the abstract/stub constructor directly) to prevent
+ *    ServiceConnection leaks and no-op stub bindings.
+ * 2. Registers an `IConnectable.IConnectWatcher` dynamic proxy (with explicit `Object`
+ *    `hashCode`/`equals`/`toString` handling to avoid NPE inside OEM watcher sets) so
+ *    `getDimMenuInteraction()` and any pending `switchNaviMode()` call execute as soon as the
+ *    OEM Binder actually connects.
+ * 3. Edge-triggered only: switches layout once when CarPlay navigation starts and NEVER loops
+ *    or re-asserts, so pressing the left stalk button to view fuel consumption / TPMS stays
+ *    untouched. Always restores `MODE_DEFAULT (1)` when navigation ends, CarPlay disconnects,
+ *    or the user turns off the setting.
  */
 object Kx11DimMenuController {
     private const val TAG = "DiPlay-KX11DimMenu"
-    private const val MENU_CLASS = "com.ecarx.xui.adaptapi.diminteraction.DimMenuInteraction"
     private const val DIM_INTERACTION_CLASS = "com.ecarx.xui.adaptapi.diminteraction.DimInteraction"
+    private const val MENU_CLASS = "com.ecarx.xui.adaptapi.diminteraction.DimMenuInteraction"
     private const val MENU_INTERFACE = "com.ecarx.xui.adaptapi.diminteraction.IDimMenuInteraction"
     private const val CONNECTABLE_INTERFACE = "com.ecarx.xui.adaptapi.binder.IConnectable"
-    private const val FIRST_BIND_RETRY_DELAY_MS = 300L
+    private val WATCHER_INTERFACE_CANDIDATES = listOf(
+        "com.ecarx.xui.adaptapi.binder.IConnectable\$IConnectWatcher",
+        "com.ecarx.xui.adaptapi.binder.IConnectWatcher",
+    )
+    private const val FIRST_BIND_RETRY_DELAY_MS = 600L
 
     const val MODE_DEFAULT = 1
     const val MODE_SIMPLIFY = 2
@@ -36,17 +45,26 @@ object Kx11DimMenuController {
     private val worker = Executors.newSingleThreadScheduledExecutor { task ->
         Thread(task, "diplay-kx11-dim-menu").apply { isDaemon = true }
     }
-    private var initialized = false
+    private var initAttempted = false
+    private var rootInstance: Any? = null
+    private var watcherRegistered = false
+    private var connected = false
     private var menuInstance: Any? = null
     private var switchNaviModeMethod: Method? = null
     private var naviActive = false
     private var layoutRequested = false
+    private var pendingMode: Int? = null
     private var pendingRetry: ScheduledFuture<*>? = null
+
+    private fun isLayoutSyncEnabled(app: Context): Boolean =
+        Kx11DimSettings.clusterFullNaviLayoutEnabled(app) ||
+            app.getSharedPreferences("xcertplay_airplay", Context.MODE_PRIVATE)
+                .getBoolean("cluster_map_enabled", false)
 
     fun warmup(context: Context) {
         val app = context.applicationContext
         if (!Kx11DimSettings.isSupported()) return
-        if (!Kx11DimSettings.clusterFullNaviLayoutEnabled(app)) return
+        if (!isLayoutSyncEnabled(app)) return
         worker.execute { ensureInitialized(app) }
     }
 
@@ -54,7 +72,7 @@ object Kx11DimMenuController {
         val app = context.applicationContext
         if (!Kx11DimSettings.isSupported()) return
         worker.execute {
-            val enabled = Kx11DimSettings.clusterFullNaviLayoutEnabled(app)
+            val enabled = isLayoutSyncEnabled(app)
             val targetMode: Int? = synchronized(lock) {
                 naviActive = active
                 pendingRetry?.cancel(false)
@@ -79,11 +97,12 @@ object Kx11DimMenuController {
         }
     }
 
-    fun settingChanged(context: Context, enabled: Boolean) {
+    fun settingChanged(context: Context, @Suppress("UNUSED_PARAMETER") enabled: Boolean) {
         val app = context.applicationContext
         if (!Kx11DimSettings.isSupported()) return
         worker.execute {
-            if (enabled) {
+            val effectiveEnabled = isLayoutSyncEnabled(app)
+            if (effectiveEnabled) {
                 ensureInitialized(app)
                 val shouldApplyNow = synchronized(lock) {
                     if (naviActive && !layoutRequested) {
@@ -100,6 +119,7 @@ object Kx11DimMenuController {
                 val shouldRestore = synchronized(lock) {
                     pendingRetry?.cancel(false)
                     pendingRetry = null
+                    pendingMode = null
                     val prev = layoutRequested
                     layoutRequested = false
                     prev
@@ -112,90 +132,198 @@ object Kx11DimMenuController {
     }
 
     private fun dispatchSwitch(app: Context, mode: Int, allowSingleRetry: Boolean) {
-        val justCreated = ensureInitialized(app)
-        val ok = invokeSwitch(mode)
-        if (ok && !justCreated) return
+        ensureInitialized(app)
+        synchronized(lock) { pendingMode = mode }
+        val ok = resolveMenuIfReadyAndInvoke(mode)
+        if (ok) {
+            synchronized(lock) {
+                if (pendingMode == mode) pendingMode = null
+            }
+            return
+        }
         if (allowSingleRetry) {
-            // Single delayed retry for asynchronous OEM Binder connection on first init; never loops.
+            // Single delayed fallback in case the OEM Binder finishes connecting without invoking
+            // IConnectWatcher; never loops.
             val future = worker.schedule({
                 val stillWanted = synchronized(lock) {
                     pendingRetry = null
-                    layoutRequested && naviActive && Kx11DimSettings.clusterFullNaviLayoutEnabled(app)
+                    pendingMode == mode &&
+                        layoutRequested &&
+                        naviActive &&
+                        isLayoutSyncEnabled(app)
                 }
                 if (!stillWanted) return@schedule
-                val retryOk = invokeSwitch(mode)
-                if (!retryOk) {
-                    synchronized(lock) { layoutRequested = false }
+                val retryOk = resolveMenuIfReadyAndInvoke(mode)
+                synchronized(lock) {
+                    if (retryOk && pendingMode == mode) {
+                        pendingMode = null
+                    } else if (!retryOk && !connected) {
+                        // Keep pendingMode armed for onConnected() callback if binder connects later.
+                        Log.i(TAG, "Deferred switchNaviMode($mode) awaiting IConnectWatcher.onConnected")
+                    }
                 }
             }, FIRST_BIND_RETRY_DELAY_MS, TimeUnit.MILLISECONDS)
             synchronized(lock) { pendingRetry = future }
-        } else if (!ok && mode == MODE_FULL_NAVI) {
-            synchronized(lock) { layoutRequested = false }
         }
     }
 
-    /** Returns true if the AdaptAPI instance was freshly created on this call. */
-    private fun ensureInitialized(app: Context): Boolean {
+    private fun ensureInitialized(app: Context) {
         synchronized(lock) {
-            if (initialized && menuInstance != null && switchNaviModeMethod != null) return false
-            if (initialized && menuInstance == null) return false
-            initialized = true
-            val resolved = resolveMenuInteraction(app)
-            if (resolved != null) {
-                menuInstance = resolved.first
-                switchNaviModeMethod = resolved.second
-                Log.i(TAG, "Initialized DimMenuInteraction via ${resolved.first.javaClass.name}")
-                return true
-            }
-            Log.w(TAG, "DimMenuInteraction unavailable on this firmware")
-            return false
+            if (initAttempted && rootInstance != null) return
+            if (initAttempted && rootInstance == null) return
+            initAttempted = true
         }
+        val created = createRootInstance(app)
+        if (created == null) {
+            Log.w(TAG, "AdaptAPI DimInteraction/DimMenuInteraction unavailable on this firmware")
+            return
+        }
+        synchronized(lock) {
+            rootInstance = created
+        }
+        val watcherRegisteredNow = registerConnectWatcherAndConnect(created)
+        Log.i(TAG, "Initialized root=${created.javaClass.name} watcherRegistered=$watcherRegisteredNow")
+        // Eagerly resolve menu handle in case the OEM SDK is synchronously ready.
+        resolveMenuFromRoot(created)
     }
 
-    private fun resolveMenuInteraction(app: Context): Pair<Any, Method>? {
-        // Strategy 1: direct DimMenuInteraction(Context) constructor.
-        runCatching {
-            val cls = Class.forName(MENU_CLASS)
-            val instance = cls.getConstructor(Context::class.java).newInstance(app)
-            val method = findSwitchMethod(instance)
-            if (method != null) return instance to method
-        }
-        // Strategy 2: static DimMenuInteraction.create(Context).
-        runCatching {
-            val cls = Class.forName(MENU_CLASS)
-            val instance = cls.getMethod("create", Context::class.java).invoke(null, app)
-            if (instance != null) {
-                connectIfNeeded(instance)
-                val method = findSwitchMethod(instance)
-                if (method != null) return instance to method
-            }
-        }
-        // Strategy 3: factory DimInteraction.create(Context) -> getDimMenuInteraction()/getMenuInteraction().
+    private fun createRootInstance(app: Context): Any? {
+        // Strategy 1 (Primary): DimInteraction.create(Context) factory.
         runCatching {
             val dimCls = Class.forName(DIM_INTERACTION_CLASS)
             val dim = dimCls.getMethod("create", Context::class.java).invoke(null, app)
             if (dim != null) {
-                connectIfNeeded(dim)
-                val getter = listOf("getDimMenuInteraction", "getMenuInteraction").firstNotNullOfOrNull { name ->
-                    runCatching { dim.javaClass.getMethod(name) }.getOrNull()
-                }
-                val menu = getter?.invoke(dim)
-                if (menu != null) {
-                    val method = findSwitchMethod(menu)
-                    if (method != null) return menu to method
-                }
+                Log.i(TAG, "Strategy 1 DimInteraction.create() -> ${dim.javaClass.name}")
+                return dim
             }
+        }.onFailure {
+            Log.w(TAG, "Strategy 1 DimInteraction.create() failed: ${it.javaClass.simpleName}: ${it.message}")
+        }
+        // Strategy 2 (Fallback): DimMenuInteraction.create(Context) factory.
+        runCatching {
+            val menuCls = Class.forName(MENU_CLASS)
+            val menu = menuCls.getMethod("create", Context::class.java).invoke(null, app)
+            if (menu != null) {
+                Log.i(TAG, "Strategy 2 DimMenuInteraction.create() -> ${menu.javaClass.name}")
+                return menu
+            }
+        }.onFailure {
+            Log.w(TAG, "Strategy 2 DimMenuInteraction.create() failed: ${it.javaClass.simpleName}: ${it.message}")
         }
         return null
     }
 
-    private fun connectIfNeeded(target: Any) {
-        runCatching {
-            val connectable = Class.forName(CONNECTABLE_INTERFACE)
-            if (connectable.isInstance(target)) {
-                connectable.getMethod("connect").invoke(target)
+    private fun registerConnectWatcherAndConnect(target: Any): Boolean {
+        synchronized(lock) {
+            if (watcherRegistered) return true
+        }
+        val connectableCls = runCatching { Class.forName(CONNECTABLE_INTERFACE) }.getOrNull()
+        val isConnectable = connectableCls != null && connectableCls.isInstance(target)
+        var registered = false
+        if (isConnectable) {
+            val watcherInterface = resolveWatcherInterface(target.javaClass.classLoader)
+            if (watcherInterface != null) {
+                runCatching {
+                    val proxy = createConnectWatcherProxy(
+                        watcherInterface = watcherInterface,
+                        onConnected = { onBinderConnected() },
+                        onDisconnected = { onBinderDisconnected() },
+                    )
+                    connectableCls!!.getMethod("registerConnectWatcher", watcherInterface).invoke(target, proxy)
+                    synchronized(lock) { watcherRegistered = true }
+                    registered = true
+                }.onFailure {
+                    Log.w(TAG, "registerConnectWatcher failed: ${it.javaClass.simpleName}: ${it.message}")
+                }
+            }
+            runCatching {
+                connectableCls!!.getMethod("connect").invoke(target)
+                Log.i(TAG, "Invoked IConnectable.connect() on ${target.javaClass.name}")
+            }.onFailure {
+                Log.w(TAG, "IConnectable.connect() failed: ${it.javaClass.simpleName}: ${it.message}")
             }
         }
+        return registered
+    }
+
+    private fun onBinderConnected() {
+        Log.i(TAG, "IConnectWatcher.onConnected()")
+        worker.execute {
+            val root: Any?
+            val modeToReplay: Int?
+            synchronized(lock) {
+                connected = true
+                root = rootInstance
+                modeToReplay = when (val pending = pendingMode) {
+                    MODE_FULL_NAVI -> if (layoutRequested && naviActive) pending else null
+                    else -> pending
+                }
+            }
+            if (root != null) {
+                resolveMenuFromRoot(root)
+            }
+            if (modeToReplay != null) {
+                val ok = invokeSwitch(modeToReplay)
+                if (ok) {
+                    synchronized(lock) {
+                        if (pendingMode == modeToReplay) pendingMode = null
+                    }
+                }
+            }
+        }
+    }
+
+    private fun onBinderDisconnected() {
+        Log.w(TAG, "IConnectWatcher.onDisConnected()")
+        synchronized(lock) {
+            connected = false
+            menuInstance = null
+            switchNaviModeMethod = null
+        }
+    }
+
+    private fun resolveMenuIfReadyAndInvoke(mode: Int): Boolean {
+        val root = synchronized(lock) { rootInstance } ?: return false
+        val hasMenu = synchronized(lock) { menuInstance != null && switchNaviModeMethod != null }
+        if (!hasMenu) {
+            resolveMenuFromRoot(root)
+        }
+        return invokeSwitch(mode)
+    }
+
+    private fun resolveMenuFromRoot(root: Any): Boolean {
+        val direct = findSwitchMethod(root)
+        if (direct != null) {
+            synchronized(lock) {
+                menuInstance = root
+                switchNaviModeMethod = direct
+            }
+            Log.i(TAG, "Resolved menu directly on ${root.javaClass.name}")
+            return true
+        }
+        val getter = listOf("getDimMenuInteraction", "getMenuInteraction").firstNotNullOfOrNull { name ->
+            runCatching { root.javaClass.getMethod(name) }.getOrNull()
+        } ?: return false
+        val menu = runCatching { getter.invoke(root) }.onFailure {
+            Log.w(TAG, "${getter.name}() failed: ${it.javaClass.simpleName}: ${it.message}")
+        }.getOrNull() ?: return false
+        val method = findSwitchMethod(menu) ?: return false
+        synchronized(lock) {
+            menuInstance = menu
+            switchNaviModeMethod = method
+        }
+        Log.i(TAG, "Resolved menu via ${getter.name}() -> ${menu.javaClass.name}")
+        return true
+    }
+
+    private fun resolveWatcherInterface(fallbackLoader: ClassLoader?): Class<*>? {
+        for (name in WATCHER_INTERFACE_CANDIDATES) {
+            runCatching { Class.forName(name) }.getOrNull()?.let { return it }
+            if (fallbackLoader != null) {
+                runCatching { Class.forName(name, false, fallbackLoader) }.getOrNull()?.let { return it }
+            }
+        }
+        return null
     }
 
     private fun findSwitchMethod(instance: Any): Method? {
@@ -220,5 +348,63 @@ object Kx11DimMenuController {
         }.onFailure {
             Log.w(TAG, "switchNaviMode($mode) failed: ${it.javaClass.simpleName}: ${it.message}")
         }.getOrDefault(false)
+    }
+
+    /**
+     * Creates a dynamic proxy implementing the OEM `IConnectWatcher` interface.
+     * Explicitly handles [Object.hashCode], [Object.equals], and [Object.toString] so OEM SDK
+     * collections (`HashSet`/`HashMap`) never NPE when unboxing proxy return values.
+     */
+    internal fun createConnectWatcherProxy(
+        watcherInterface: Class<*>,
+        onConnected: () -> Unit,
+        onDisconnected: () -> Unit,
+    ): Any = Proxy.newProxyInstance(
+        watcherInterface.classLoader,
+        arrayOf(watcherInterface),
+    ) { proxy, method, args ->
+        when (method.name) {
+            "hashCode" -> System.identityHashCode(proxy)
+            "equals" -> proxy === args?.getOrNull(0)
+            "toString" -> "Kx11ConnectWatcher@${Integer.toHexString(System.identityHashCode(proxy))}"
+            "onConnected" -> {
+                onConnected()
+                null
+            }
+            "onDisConnected", "onDisconnected" -> {
+                onDisconnected()
+                null
+            }
+            else -> defaultReturnValue(method.returnType)
+        }
+    }
+
+    private fun defaultReturnValue(returnType: Class<*>): Any? = when (returnType) {
+        Boolean::class.javaPrimitiveType -> false
+        Byte::class.javaPrimitiveType -> 0.toByte()
+        Short::class.javaPrimitiveType -> 0.toShort()
+        Int::class.javaPrimitiveType -> 0
+        Long::class.javaPrimitiveType -> 0L
+        Float::class.javaPrimitiveType -> 0f
+        Double::class.javaPrimitiveType -> 0.0
+        Char::class.javaPrimitiveType -> '\u0000'
+        else -> null
+    }
+
+    /** Test-only reset helper. */
+    internal fun resetForTest() {
+        synchronized(lock) {
+            pendingRetry?.cancel(false)
+            pendingRetry = null
+            initAttempted = false
+            rootInstance = null
+            watcherRegistered = false
+            connected = false
+            menuInstance = null
+            switchNaviModeMethod = null
+            naviActive = false
+            layoutRequested = false
+            pendingMode = null
+        }
     }
 }

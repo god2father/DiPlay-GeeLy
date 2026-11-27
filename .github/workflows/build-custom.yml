@@ -83,13 +83,17 @@ jobs:
             --tests "com.shilapi.xcertplay.hud.Kx11DimNaviMapperTest" \
             --tests "com.shilapi.xcertplay.hud.Kx11DimNaviClientTest" \
             --tests "com.shilapi.xcertplay.hud.Kx11DimMediaClientTest" \
+            --tests "com.shilapi.xcertplay.hud.Kx11DimMenuControllerTest" \
             --tests "com.shilapi.xcertplay.media.AudioFocusPermanentLossTest" \
+            --tests "com.shilapi.xcertplay.media.Kx11UnifiedAudioChannelTest" \
             --stacktrace
           ./gradlew :vehicle-probe:testDebugUnitTest \
             --tests "com.shilapi.xcertplay.vehicleprobe.ProbeSummaryKx11Test" \
             --stacktrace
           ./gradlew :common:testDebugUnitTest \
             --tests "com.shilapi.xcertplay.GeelyClusterDisplayTest" \
+            --tests "com.shilapi.xcertplay.Kx11ClusterDisplayTest" \
+            --tests "com.shilapi.xcertplay.Kx11HeadrestAudioRouteTest" \
             --tests "com.shilapi.xcertplay.Kx11ProjectionDefaultsTest" \
             --tests "com.shilapi.xcertplay.CarHotspotSwitchTest" \
             --tests "com.shilapi.xcertplay.SettingsLayoutSourceRulesTest" \

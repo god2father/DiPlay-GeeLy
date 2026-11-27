@@ -18,7 +18,7 @@ class PhoneBluetoothReceiver : BroadcastReceiver() {
         }
         if (intent.action != BluetoothDevice.ACTION_ACL_CONNECTED ||
             !DiPlayPreferences.connectOnPhoneBluetooth(context) ||
-            CarPlayBackgroundSession.hasSession()) return
+            CarPlayBackgroundSession.active) return
         val selected = DiPlayPreferences.phoneAddress(context) ?: return
         if (Build.VERSION.SDK_INT >= 31 &&
             context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) return
@@ -39,6 +39,13 @@ class PhoneBluetoothReceiver : BroadcastReceiver() {
         if (prefs.contains("last_launch_elapsed") && now >= previous && now - previous < 15_000) return
         prefs.edit().putLong("last_launch_elapsed", now).commit()
         PhoneWakeDiagnostics.record(context, "matched")
+        if (com.shilapi.xcertplay.hud.Kx11DimSettings.isSupported()) {
+            // On KX11_A2, STR deep sleep tears down uap0 and may kill DiPlay's process; ACL_CONNECTED
+            // is the static broadcast that reliably revives the process when the driver returns.
+            Kx11WakeGuardService.triggerBtWake(context, "PhoneBluetoothReceiver")
+            return
+        }
+        if (CarPlayBackgroundSession.hasSession()) return
         val launch = Intent(context, DiPlayActivity::class.java).apply {
             putExtra(EXTRA_AUTO_CONNECT, launchToken)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)

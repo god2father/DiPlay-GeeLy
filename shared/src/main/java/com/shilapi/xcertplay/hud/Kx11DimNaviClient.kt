@@ -123,6 +123,7 @@ internal class Kx11DimNaviPublisher(
     private val lock = Any()
     private val routeState = BydHudRouteState(nanoTime = nanoTime)
     private var currentLanes: List<LaneGuidanceLane> = emptyList()
+    private var routeActive = false
     private var naviActiveOnDim = false
     private var lastStatusSentMs = 0L
     private var lastTurnId = -1
@@ -133,19 +134,19 @@ internal class Kx11DimNaviPublisher(
     private val flushTask = Runnable { flushNow() }
 
     fun setEnabled(next: Boolean) {
-        val shouldClear = synchronized(lock) {
+        val shouldClearHud = synchronized(lock) {
             if (enabled == next) return
             enabled = next
             !next
         }
-        if (shouldClear) clear()
+        if (shouldClearHud) clearHudOutput()
     }
 
     fun onFrame(frame: Iap2Frame) {
         val shouldClear: Boolean
         val shouldSchedule: Boolean
+        val notifyBecameActive: Boolean
         synchronized(lock) {
-            if (!enabled) return
             when (frame.messageId) {
                 BydHudRouteState.ROUTE_GUIDANCE_UPDATE,
                 BydHudRouteState.ROUTE_GUIDANCE_MANEUVER_UPDATE -> {
@@ -154,18 +155,26 @@ internal class Kx11DimNaviPublisher(
                         currentLanes = emptyList()
                         shouldClear = true
                         shouldSchedule = false
+                        notifyBecameActive = false
                     } else {
+                        val hasGuidance = routeState.currentApple() != null
+                        notifyBecameActive = hasGuidance && !routeActive
+                        if (notifyBecameActive) routeActive = true
                         shouldClear = false
-                        shouldSchedule = change == BydHudRouteChange.GUIDANCE && routeState.currentApple() != null
+                        shouldSchedule = enabled && change == BydHudRouteChange.GUIDANCE && hasGuidance
                     }
                 }
                 Iap2LaneGuidance.LANE_GUIDANCE_INFO_UPDATE -> {
                     currentLanes = Iap2LaneGuidance.parse(frame.payload)
                     shouldClear = false
-                    shouldSchedule = routeState.currentApple() != null
+                    shouldSchedule = enabled && routeState.currentApple() != null
+                    notifyBecameActive = false
                 }
                 else -> return
             }
+        }
+        if (notifyBecameActive) {
+            runCatching { onNaviActiveChanged(true) }
         }
         if (shouldClear) {
             clear()
@@ -175,11 +184,10 @@ internal class Kx11DimNaviPublisher(
         }
     }
 
-    fun clear() {
+    /** Clears OEM HUD output without wiping active route tracking (e.g. HUD off, cluster map on). */
+    private fun clearHudOutput() {
         cancelScheduled(flushTask)
         val needDimReset = synchronized(lock) {
-            routeState.clear()
-            currentLanes = emptyList()
             lastFrame = null
             lastTurnId = -1
             lastSentEta = null
@@ -189,7 +197,33 @@ internal class Kx11DimNaviPublisher(
             wasActive
         }
         if (!needDimReset) return
-        runCatching { onNaviActiveChanged(false) }
+        sendClearToDim()
+    }
+
+    fun clear() {
+        cancelScheduled(flushTask)
+        val wasRouteActive: Boolean
+        val needDimReset: Boolean
+        synchronized(lock) {
+            routeState.clear()
+            currentLanes = emptyList()
+            lastFrame = null
+            lastTurnId = -1
+            lastSentEta = null
+            lastStatusSentMs = 0L
+            wasRouteActive = routeActive
+            routeActive = false
+            needDimReset = naviActiveOnDim
+            naviActiveOnDim = false
+        }
+        if (wasRouteActive || needDimReset) {
+            runCatching { onNaviActiveChanged(false) }
+        }
+        if (!needDimReset) return
+        sendClearToDim()
+    }
+
+    private fun sendClearToDim() {
         val remote = binderProvider() ?: return
         runCatching {
             val api = Kx11DimNaviBinder(remote)
@@ -262,7 +296,8 @@ internal class Kx11DimNaviPublisher(
             api.updateETA(etaToSend)
             var becameActive = false
             synchronized(lock) {
-                becameActive = !naviActiveOnDim
+                becameActive = !routeActive
+                routeActive = true
                 naviActiveOnDim = true
                 lastFrame = frameToEmit
                 lastTurnId = frameToEmit.turnId
@@ -299,6 +334,21 @@ object Kx11DimNaviBridge {
     private var workerThread: HandlerThread? = null
     private var workerHandler: Handler? = null
     private var publisher: Kx11DimNaviPublisher? = null
+    @Volatile private var naviActive = false
+    @Volatile private var clusterNaviListener: ((Boolean) -> Unit)? = null
+
+    fun isNaviActive(): Boolean = naviActive
+
+    fun setClusterNaviActiveListener(listener: ((Boolean) -> Unit)?) {
+        clusterNaviListener = listener
+        listener?.invoke(naviActive)
+    }
+
+    fun clearClusterNaviActiveListener(expected: (Boolean) -> Unit) {
+        if (clusterNaviListener === expected) {
+            clusterNaviListener = null
+        }
+    }
 
     private val deathRecipient = IBinder.DeathRecipient {
         synchronized(lock) {
@@ -340,7 +390,9 @@ object Kx11DimNaviBridge {
                     scheduleDelayed = { delayMs, action -> handler.postDelayed(action, delayMs) },
                     cancelScheduled = { action -> handler.removeCallbacks(action) },
                     onNaviActiveChanged = { active ->
+                        naviActive = active
                         appContext?.let { Kx11DimMenuController.onNaviActiveChanged(it, active) }
+                        runCatching { clusterNaviListener?.invoke(active) }
                     },
                 )
             }

@@ -1018,10 +1018,13 @@
     <string name="kx11_dim_navi_hud_description">将 CarPlay 转向箭头、路口距离、下条路名、剩余时间及多车道引导线原生推送到原厂 AR-HUD 与液晶仪表，不遮挡原车车速、限速与智驾图标。立即生效。</string>
     <string name="kx11_dim_cluster_media_title">原厂仪表 CarPlay 音乐与封面（KX11）</string>
     <string name="kx11_dim_cluster_media_description">在原厂液晶仪表盘显示 CarPlay 歌名、歌手、进度与专辑封面；暂停或结束时自动停表，不抢占原车网易云等音乐卡片。立即生效。</string>
+    <string name="kx11_headrest_navi_title">导航播报走主驾头枕音响（KX11）</string>
+    <string name="kx11_headrest_navi_description">将 CarPlay 导航与电子眼提示音直出至车机导航总线（bus1_navigation_out）；需配合原车「设置 → 声音 → 头枕音响模式 → 驾享模式」使用。重连 CarPlay 后生效。</string>
+    <string name="kx11_headrest_navi_unavailable">当前车机未检测到 bus1_navigation_out 导航音频总线</string>
     <string name="kx11_no_duck_music_title">导航/提示音不压低音乐（KX11）</string>
-    <string name="kx11_no_duck_music_description">导航播报或原车电子眼提示音触发临时降音时，保持 CarPlay 音乐满音量不衰减。重连 CarPlay 后生效。</string>
+    <string name="kx11_no_duck_music_description">禁止 CarPlay 提示音与临时降音焦点衰减音乐音量，保持满音量播放（建议同时关闭手机导航 App 及原车设置中的导航压低媒体选项）。重连 CarPlay 后生效。</string>
     <string name="kx11_cluster_full_navi_title">仪表全屏导航画布联动（KX11 实验）</string>
-    <string name="kx11_cluster_full_navi_description">开启导航时单次调用原车仪表切换为全屏导航视图（保留左右圆表盘，不抢占左侧拨杆切油耗/胎压），导航结束或关闭开关自动还原。默认关闭。</string>
+    <string name="kx11_cluster_full_navi_description">导航开始时单次切换原车全屏导航视图（避让顶栏车速与底栏状态，不抢占左侧拨杆切油耗/胎压），非导航或关闭开关自动保留/恢复原车三分区仪表。默认关闭。</string>
     <string name="kx11_wake_guard_channel">休眠唤醒自启守护</string>
     <string name="kx11_wake_guard_running">已就绪：休眠唤醒后自动开启热点并启动 DiPlay</string>
 </resources>

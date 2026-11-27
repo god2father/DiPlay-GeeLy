@@ -887,8 +887,20 @@ open class CarPlayHostActivity : ComponentActivity() {
             AirPlayPersistence.saveWirelessEnabled(this, false)
         }
         if (runCatching { DiPlayBootstrap.ensure(this, AirPlayPersistence.loadMfiTarget(this)) }.isFailure) {
-            OwnScreenStart.start(this, Intent(this, DiPlayActivity::class.java), ::appendLog)
+            val homeIntent = Intent(this, DiPlayActivity::class.java).apply {
+                if (this@CarPlayHostActivity !is SameTaskCarPlayHostActivity) {
+                    addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                    )
+                }
+            }
+            OwnScreenStart.start(this, homeIntent, ::appendLog)
             finish(); return
+        }
+        if (Kx11ClusterDisplay.supported()) {
+            com.shilapi.xcertplay.hud.Kx11DimNaviBridge.setClusterNaviActiveListener(kx11ClusterNaviListener)
         }
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         getSystemService(android.hardware.display.DisplayManager::class.java)
@@ -1383,6 +1395,14 @@ open class CarPlayHostActivity : ComponentActivity() {
             dismissClusterPresentation()
             return
         }
+        // On 2025 KX11_A2, keep the factory 3-zone cluster (speed + ADAS car + native CarPlay
+        // music card) intact while not navigating, and mount/dismiss the Display 4 Presentation
+        // on guidance transitions instead of relying on window alpha over SurfaceView.
+        if (Kx11ClusterDisplay.supported() && !com.shilapi.xcertplay.hud.Kx11DimNaviBridge.isNaviActive()) {
+            clusterLaunchGate.reset()
+            dismissClusterPresentation()
+            return
+        }
         // 仪表流参数已在握手前准备；实际窗口和 ADB 投屏等中控首帧后再启动。
         if (!clusterOutputReady()) {
             clusterLaunchGate.reset()
@@ -1666,6 +1686,15 @@ open class CarPlayHostActivity : ComponentActivity() {
                     ).also {
                         MapMirrors.streamAspect = it.widthPixels.toDouble() / it.heightPixels
                         appendLog("Cluster map: Geely instrument ${size.x}x${size.y}; stream ${it.widthPixels}x${it.heightPixels}; safeArea=${it.safeArea}")
+                    }
+                }
+                if (Kx11ClusterDisplay.supported() && Kx11ClusterDisplay.matches(display, size.x, size.y)) {
+                    return Kx11ClusterDisplay.streamConfig(
+                        AirPlayPersistence.loadClusterContent(this),
+                        safeAreaRect = AirPlayPersistence.loadClusterSafeAreaRect(this),
+                    ).also {
+                        MapMirrors.streamAspect = it.widthPixels.toDouble() / it.heightPixels
+                        appendLog("Cluster map: KX11 instrument ${size.x}x${size.y}; stream ${it.widthPixels}x${it.heightPixels}; safeArea=${it.safeArea}")
                     }
                 }
                 if (DiLink4ClusterDisplay.matches(display.name, size.x, size.y)) {
@@ -2021,6 +2050,9 @@ open class CarPlayHostActivity : ComponentActivity() {
             return
         }
         CarPlayScreen.destroyed(this)
+        if (Kx11ClusterDisplay.supported()) {
+            com.shilapi.xcertplay.hud.Kx11DimNaviBridge.clearClusterNaviActiveListener(kx11ClusterNaviListener)
+        }
         runCatching { unregisterReceiver(bluetoothOnReceiver) }
         mainHandler.removeCallbacks(hideTemporarySystemBars)
         dropHeldTouch()
@@ -5417,8 +5449,10 @@ open class CarPlayHostActivity : ComponentActivity() {
             mainVideoFrameRate = fps,
             vendorLowLatencyDecoder = AirPlayPersistence.loadLowLatencyDecoder(this),
             mtkDecoderTuningEnabled = AirPlayPersistence.loadMtkDecoderTuning(this),
-            navigationPromptAudioFocus = AirPlayPersistence.loadNavigationPromptAudioFocus(this),
+            navigationPromptAudioFocus = AirPlayPersistence.loadNavigationPromptAudioFocus(this) &&
+                !com.shilapi.xcertplay.hud.Kx11DimSettings.noDuckMusicEnabled(this),
             duckMusicOnTransientDuck = !com.shilapi.xcertplay.hud.Kx11DimSettings.noDuckMusicEnabled(this),
+            ignoreNavigationDuck = com.shilapi.xcertplay.hud.Kx11DimSettings.noDuckMusicEnabled(this),
         )
     }
 
@@ -6300,10 +6334,47 @@ open class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
+    private val kx11ClusterNaviListener: (Boolean) -> Unit = { _ ->
+        runOnUiThread {
+            if (!isDestroyed && !shuttingDown.get()) {
+                ensureClusterPresentation()
+            }
+        }
+    }
+
+    internal fun onVehicleStrWake(reason: String = "KX11 STR wake") {
+        runOnUiThread {
+            if (isDestroyed || shuttingDown.get() || handshakeResetInProgress) return@runOnUiThread
+            if (!CarPlayBackgroundSession.isOwner(this)) return@runOnUiThread
+            if (CarPlayBackgroundSession.active) return@runOnUiThread
+            startupRetryBudget.manualRetry()
+            startupRetryStopped = false
+            reconnectAttempts = 0
+            startupRetryButton?.visibility = View.GONE
+            if (menuOpen) {
+                recoveryPendingAfterMenu = true
+                return@runOnUiThread
+            }
+            cancelReconnect()
+            appendLog("$reason: resetting wireless retry budget and reconnecting")
+            restartCarPlay(reason)
+        }
+    }
+
     private fun showDiPlayHome(page: String = "home") {
         releaseCarPlayTouches()
-        OwnScreenStart.start(this, Intent(this, DiPlayActivity::class.java)
-            .putExtra("page", page).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT), ::appendLog)
+        val intent = Intent(this, DiPlayActivity::class.java).putExtra("page", page).apply {
+            if (this@CarPlayHostActivity !is SameTaskCarPlayHostActivity) {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                )
+            } else {
+                addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            }
+        }
+        OwnScreenStart.start(this, intent, ::appendLog)
     }
 
     /** Keep a timed-out sink visible to surface teardown until its codecs have actually been released. */

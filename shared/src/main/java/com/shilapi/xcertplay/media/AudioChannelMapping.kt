@@ -9,6 +9,42 @@ internal fun isPhoneAudio(type: String) = type.equals("telephony", true) || type
 internal fun isVehicleNavigationAudio(type: String): Boolean =
     type.equals("default", true) || type.equals("guidance", true) || type.equals("navigation", true)
 
+/**
+ * Channel selection for unified automotive media routing.
+ *
+ * When [ignoreNavigationDuck] is enabled (e.g. KX11_A2), CarPlay `alert` and `compatibility`
+ * short prompts route as [AudioChannel.NAVIGATION] so they play on the navigation/headrest bus
+ * without grabbing `RINGTONE`/speech priority or muting background music to 0f.
+ * Calls (`telephony`/`facetime`), incoming ringtones (`ringtone`/`ring`), and Siri
+ * (`speechrecognition`) retain full interruption semantics.
+ */
+internal fun selectUnifiedAudioChannel(
+    audioType: String,
+    ignoreNavigationDuck: Boolean,
+): AudioChannelSelection {
+    if (audioType.equals("compatibility", true)) {
+        return if (ignoreNavigationDuck) {
+            AudioChannelSelection(AudioChannel.NAVIGATION, AudioContentType.SPEECH)
+        } else {
+            AudioChannelSelection(AudioChannel.MEDIA, AudioContentType.SPEECH)
+        }
+    }
+    if (isVehicleNavigationAudio(audioType)) {
+        return AudioChannelSelection(AudioChannel.NAVIGATION, AudioContentType.SPEECH)
+    }
+    return when (audioType.lowercase()) {
+        "telephony", "facetime" -> AudioChannelSelection(AudioChannel.PHONE, AudioContentType.SPEECH)
+        "speechrecognition" -> AudioChannelSelection(AudioChannel.ASSISTANT, AudioContentType.SPEECH)
+        "ringtone", "ring" -> AudioChannelSelection(AudioChannel.RINGTONE, AudioContentType.SPEECH)
+        "alert" -> if (ignoreNavigationDuck) {
+            AudioChannelSelection(AudioChannel.NAVIGATION, AudioContentType.SPEECH)
+        } else {
+            AudioChannelSelection(AudioChannel.RINGTONE, AudioContentType.SPEECH)
+        }
+        else -> AudioChannelSelection(AudioChannel.MEDIA, AudioContentType.MUSIC)
+    }
+}
+
 internal enum class AudioChannelMappingMode {
     MOBILE_COMPATIBLE,
     AUTOMOTIVE_BUS,

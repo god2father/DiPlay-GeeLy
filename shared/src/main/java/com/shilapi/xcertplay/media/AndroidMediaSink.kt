@@ -102,6 +102,12 @@ class AndroidMediaSink(
     navigationPromptAudioFocus: Boolean = false,
     /** When false, transient CAN_DUCK focus callbacks keep CarPlay music at full volume. */
     duckMusicOnTransientDuck: Boolean = true,
+    /**
+     * When true on unified automotive routing (e.g. KX11_A2), CarPlay `alert` and `compatibility`
+     * short prompts route as [AudioChannel.NAVIGATION] instead of grabbing `RINGTONE`/speech
+     * priority and muting background music to 0f. Calls, ringtones, and Siri remain untouched.
+     */
+    private val ignoreNavigationDuck: Boolean = false,
 ) : MediaSink {
     // Each downlink publishes its own reference; a mic must match that stream and sample rate.
     private val callEchoReferences = ConcurrentHashMap<AudioStreamId, EchoReference>()
@@ -828,6 +834,7 @@ class AndroidMediaSink(
             navigationOutputDevice,
             audioOutputRoutes,
             unifiedMediaOutput,
+            ignoreNavigationDuck = ignoreNavigationDuck,
             echoReference = echoReference,
             voiceFilter = callVoiceFilter && format.audioType == TELEPHONY_AUDIO_TYPE,
             onReleased = { renderer ->
@@ -1872,6 +1879,7 @@ private class AudioRenderer(
     private val navigationOutputDevice: AudioOutputDevice?,
     private val audioOutputRoutes: AudioOutputRoutes,
     private val unifiedMediaOutput: Boolean,
+    private val ignoreNavigationDuck: Boolean = false,
     private val onReleased: (AudioRenderer) -> Unit,
     private val ambientSinkToken: Long,
     private val speakerphoneCall: Boolean = false,
@@ -2288,17 +2296,11 @@ private class AudioRenderer(
     ): AudioAttributes = LegacyAudioFallback.attributes(streamOverride) ?: audioAttributesFor(selection)
 
     private fun mappedSelection(): AudioChannelSelection {
+        if (unifiedMediaOutput) {
+            return selectUnifiedAudioChannel(format.audioType, ignoreNavigationDuck)
+        }
         if (format.audioType.equals("compatibility", true)) {
             return AudioChannelSelection(AudioChannel.MEDIA, AudioContentType.SPEECH)
-        }
-        if (unifiedMediaOutput && isVehicleNavigationAudio(format.audioType)) {
-            return AudioChannelSelection(AudioChannel.NAVIGATION, AudioContentType.SPEECH)
-        }
-        if (unifiedMediaOutput) return when (format.audioType.lowercase()) {
-            "telephony", "facetime" -> AudioChannelSelection(AudioChannel.PHONE, AudioContentType.SPEECH)
-            "speechrecognition" -> AudioChannelSelection(AudioChannel.ASSISTANT, AudioContentType.SPEECH)
-            "ringtone", "ring", "alert" -> AudioChannelSelection(AudioChannel.RINGTONE, AudioContentType.SPEECH)
-            else -> AudioChannelSelection(AudioChannel.MEDIA, AudioContentType.MUSIC)
         }
         if (factoryAudio != null && format.audioType.equals("alert", true)) {
             return AudioChannelSelection(AudioChannel.RINGTONE, AudioContentType.SPEECH)
@@ -2594,7 +2596,8 @@ private class AudioRenderer(
     private fun writePcm(data: ByteArray, offset: Int = 0, length: Int = data.size) {
         val track = track ?: return
         // carlito | Navigation remains an overlay; short compatibility/voice audio interrupts music.
-        if (length > 0 && (format.audioType.equals("compatibility", true) ||
+        val compatibilityInterrupts = format.audioType.equals("compatibility", true) && !ignoreNavigationDuck
+        if (length > 0 && (compatibilityInterrupts ||
                 mappedChannel in listOf(AudioChannel.PHONE, AudioChannel.ASSISTANT, AudioChannel.RINGTONE))) {
             val pendingFrames = bufferProgress.queuedBytes(track.playbackHeadPosition) / frameBytes
             val durationMillis = ((pendingFrames + length / frameBytes) * 1000L + format.sampleRate - 1L) / format.sampleRate

@@ -380,6 +380,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     private var languagePreferenceAtCreate = AppLocale.SYSTEM
+    private var bootAutoLaunchPending = false
 
     private var interfaceOverride: Configuration? = null
     private var interfaceSystemDensityDpi = 0
@@ -450,11 +451,14 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         scheduleAutomaticVehicleValidation()
         handleWirelessRecovery()
         if (consumeBluetoothAutoConnectIntent(intent)) {
+            bootAutoLaunchPending = false
             if (initialLaunch) {
                 initialLaunch = false
                 startCarHotspotOnLaunch()
             }
             handler.post { connect(true) }
+        } else if (consumeBootAutoLaunchIntent(intent)) {
+            bootAutoLaunchPending = page == "home"
         }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -477,12 +481,21 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         scheduleAutomaticVehicleValidation()
         handleWirelessRecovery()
         if (consumeBluetoothAutoConnectIntent(intent)) {
+            bootAutoLaunchPending = false
             if (initialLaunch) {
                 initialLaunch = false
                 startCarHotspotOnLaunch()
             }
             handler.post { connect(true) }
+        } else if (consumeBootAutoLaunchIntent(intent)) {
+            bootAutoLaunchPending = page == "home"
         }
+    }
+    private fun consumeBootAutoLaunchIntent(intent: Intent): Boolean {
+        val requested = intent.getStringExtra(Kx11WakeGuardService.EXTRA_BOOT_AUTO_LAUNCH) ==
+            Kx11WakeGuardService.autoLaunchToken
+        intent.removeExtra(Kx11WakeGuardService.EXTRA_BOOT_AUTO_LAUNCH)
+        return requested && setupError == null
     }
     private fun consumeBluetoothAutoConnectIntent(intent: Intent): Boolean {
         val requested = intent.getStringExtra(PhoneBluetoothReceiver.EXTRA_AUTO_CONNECT) == PhoneBluetoothReceiver.launchToken
@@ -586,7 +599,18 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             startCarHotspotOnLaunch()
             if (setupError == null && !CarPlayBackgroundSession.hasSession() &&
                 DiPlayPreferences.autoConnect(this) && requestedPage(intent) == null && page != "setup") {
+                bootAutoLaunchPending = false
                 handler.post { connect(DiPlayPreferences.autoConnectWireless(this)) }
+            }
+        }
+        if (bootAutoLaunchPending) {
+            bootAutoLaunchPending = false
+            if (setupError == null && page == "home") {
+                if (CarPlayBackgroundSession.hasSession() || CarPlayScreen.current() != null) {
+                    handler.post { openProjection() }
+                } else if (DiPlayPreferences.phoneAddress(this) != null) {
+                    handler.post { connect(true) }
+                }
             }
         }
     }
@@ -2263,11 +2287,27 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 }
                 toggle(
                     card,
+                    getString(R.string.kx11_headrest_navi_title),
+                    getString(R.string.kx11_headrest_navi_description),
+                    Kx11HeadrestAudioRoute.isEnabled(this),
+                ) { enabled ->
+                    val applied = Kx11HeadrestAudioRoute.setEnabled(this, enabled)
+                    if (!applied) {
+                        toast(getString(R.string.kx11_headrest_navi_unavailable))
+                        render()
+                    } else {
+                        markReconnectNeeded()
+                        render()
+                    }
+                }
+                toggle(
+                    card,
                     getString(R.string.kx11_no_duck_music_title),
                     getString(R.string.kx11_no_duck_music_description),
                     com.shilapi.xcertplay.hud.Kx11DimSettings.noDuckMusicEnabled(this),
                 ) { enabled ->
                     com.shilapi.xcertplay.hud.Kx11DimSettings.setNoDuckMusicEnabled(this, enabled)
+                    markReconnectNeeded()
                 }
                 toggle(
                     card,
@@ -2409,14 +2449,19 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 DiLink4ClusterDisplay.matches(clusterDisplay.name, clusterSize.x, clusterSize.y))
             // A cluster whose stream is the whole panel: the safe area describes what the cluster
             // keeps visible, so the scale presets and the BYD small/full-navi stream pause do not apply.
-            val fullPanelCluster = diLink4 || (clusterDisplay != null && clusterSize != null &&
-                GeelyClusterDisplay.supported() && GeelyClusterDisplay.matches(clusterDisplay, clusterSize.x, clusterSize.y))
+            val fullPanelCluster = diLink4 || (clusterDisplay != null && clusterSize != null && (
+                (GeelyClusterDisplay.supported() && GeelyClusterDisplay.matches(clusterDisplay, clusterSize.x, clusterSize.y)) ||
+                    (Kx11ClusterDisplay.supported() && Kx11ClusterDisplay.matches(clusterDisplay, clusterSize.x, clusterSize.y))
+                ))
             val clusterMapEnabled = AirPlayPersistence.loadClusterMapEnabled(this)
             reconnectingToggle(card, getString(R.string.carplay_map_on_instrument_cluster_experimental),
                 if (clusterDisplay != null || adbCluster) getString(R.string.shows_the_iphone_s_cluster_map_on_the_instrument_cluster_c)
                 else getString(R.string.shows_the_iphone_s_cluster_map_virtual_stream_description),
                 clusterMapEnabled) {
                 AirPlayPersistence.saveClusterMapEnabled(this, it)
+                if (Kx11ClusterDisplay.supported()) {
+                    com.shilapi.xcertplay.hud.Kx11DimMenuController.settingChanged(this, it)
+                }
                 render()
             }
             if (clusterMapEnabled) {
@@ -3966,10 +4011,16 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         val saved = VehicleAudioRoutes.get(this, role)
         val current = if (role.input) saved?.resolveInput(manager) else saved?.resolve(manager)
         fun deviceLabel(device: android.media.AudioDeviceInfo): String {
-            val name = device.productName.toString().trim()
+            val baseName = device.productName.toString().trim()
                 .takeIf { it.isNotBlank() && '/' !in it && '\\' !in it }
                 ?: getString(R.string.navigation_output_speaker)
-            return getString(R.string.navigation_output_device_label, name, device.id)
+            val busAddress = if (Build.VERSION.SDK_INT >= 28) {
+                device.address.trim().takeIf { it.isNotBlank() }
+            } else {
+                null
+            }
+            val displayName = if (busAddress != null) "$baseName · $busAddress" else baseName
+            return getString(R.string.navigation_output_device_label, displayName, device.id)
         }
         val value = when {
             current != null -> deviceLabel(current)
@@ -3982,14 +4033,35 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             val previous = VehicleAudioRoutes.get(this, role)
             val resolved = if (role.input) previous?.resolveInput(manager) else previous?.resolve(manager)
             val preview = AudioChannelPreview(this) { toast(getString(R.string.navigation_output_unavailable)) }
-            val fields = column().apply { setPadding(dp(24), dp(12), dp(24), dp(12)) }
+            val labels = arrayOf(getString(R.string.navigation_output_auto), *devices.map(::deviceLabel).toTypedArray())
+            val selected = if (previous == null) 0 else devices.indexOfFirst { it.id == resolved?.id }
+                .let { if (it < 0) -1 else it + 1 }
             val number = EditText(this).apply {
                 hint = getString(R.string.navigation_output_number)
                 inputType = android.text.InputType.TYPE_CLASS_NUMBER
                 setSingleLine()
                 setText((resolved?.id ?: previous?.id)?.toString().orEmpty())
             }
-            fields.addView(number)
+            // Keep the list bounded on short landscape car screens (e.g. 1920x720) so the preview
+            // and Save buttons remain visible instead of being pushed off-screen.
+            val maxListHeight = minOf(dp(220), (resources.displayMetrics.heightPixels * 0.34f).toInt().coerceAtLeast(dp(120)))
+            val deviceList = android.widget.ListView(this).apply {
+                choiceMode = android.widget.ListView.CHOICE_MODE_SINGLE
+                adapter = android.widget.ArrayAdapter(this@DiPlayActivity, android.R.layout.simple_list_item_single_choice, labels)
+                if (selected >= 0) {
+                    setItemChecked(selected, true)
+                    setSelection(selected)
+                }
+                setOnItemClickListener { _, _, which, _ ->
+                    number.error = null
+                    number.setText(if (which == 0) "" else devices[which - 1].id.toString())
+                }
+            }
+            val fields = column().apply { setPadding(dp(20), dp(8), dp(20), dp(8)) }
+            fields.addView(deviceList, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, maxListHeight))
+            fields.addView(number, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(8)
+            })
             fields.addView(label(getString(if (role.input) R.string.vehicle_audio_input_hint else R.string.navigation_output_test_note), 14, MUTED))
             fun selection(): AudioOutputDevice? {
                 val text = number.text.toString().trim()
@@ -4012,14 +4084,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     preview.play(channel, role == VehicleAudioRole.NAVIGATION, output, role)
                 }
             }, matchButton(8, 52))
-            val labels = arrayOf(getString(R.string.navigation_output_auto), *devices.map(::deviceLabel).toTypedArray())
-            val selected = if (previous == null) 0 else devices.indexOfFirst { it.id == resolved?.id }
-                .let { if (it < 0) -1 else it + 1 }
             val dialog = AlertDialog.Builder(this).setTitle(getString(role.label))
-                .setSingleChoiceItems(labels, selected) { _, which ->
-                    number.error = null
-                    number.setText(if (which == 0) "" else devices[which - 1].id.toString())
-                }
                 .setView(fields)
                 .setPositiveButton(if (CarPlayBackgroundSession.hasSession()) R.string.apply_and_reconnect else R.string.save, null)
                 .setNegativeButton(R.string.cancel, null)
@@ -4040,9 +4105,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 val value = text.toString().trim()
                 val index = if (value.isEmpty()) 0 else devices.indexOfFirst { it.id == value.toIntOrNull() }
                     .let { if (it < 0) -1 else it + 1 }
-                dialog.listView.clearChoices()
-                if (index >= 0) dialog.listView.setItemChecked(index, true)
-                dialog.listView.invalidateViews()
+                deviceList.clearChoices()
+                if (index >= 0) deviceList.setItemChecked(index, true)
+                deviceList.invalidateViews()
             }
         }
         parent.addView(control, matchButton(0, 60))
@@ -4573,8 +4638,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         if (!AirPlayPersistence.loadClusterMapEnabled(this)) return false
         val adbCluster = AdbClusterRouter.enabled(this)
         if (DiLink51ClusterLayout.supported() && !adbCluster) return false
-        // The wheel map zoom is driven by BYD media/custom keys; the Geely cluster has no such source yet.
-        if (GeelyClusterDisplay.supported()) return false
+        // The wheel map zoom is driven by BYD media/custom keys; Geely clusters have no such source yet.
+        if (GeelyClusterDisplay.supported() || Kx11ClusterDisplay.supported()) return false
         return adbCluster || ClusterMapPresentation.findDisplay(this) != null
     }
 
@@ -5567,13 +5632,19 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private fun hasPreciseLocation() =
         checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
+    private fun defaultClusterSafeAreaRect() = if (Kx11ClusterDisplay.supported()) {
+        Kx11ClusterDisplay.defaultSafeAreaRect()
+    } else {
+        DiLink4ClusterDisplay.defaultSafeAreaRect(
+            markerXPercent = AirPlayPersistence.loadClusterMarkerXPercent(this),
+            markerYPercent = AirPlayPersistence.loadClusterMarkerYPercent(this),
+        )
+    }
+
     // The cluster screen is described at connection time, so a running session reconnects over
     // its current link. The position choices need no call: getString(R.string.apply_and_reconnect) already does it.
     private fun clusterSafeAreaControls(card: LinearLayout) {
-        val rect = AirPlayPersistence.loadClusterSafeAreaRect(this)
-            ?: DiLink4ClusterDisplay.defaultSafeAreaRect(
-                markerXPercent = AirPlayPersistence.loadClusterMarkerXPercent(this),
-                markerYPercent = AirPlayPersistence.loadClusterMarkerYPercent(this))
+        val rect = AirPlayPersistence.loadClusterSafeAreaRect(this) ?: defaultClusterSafeAreaRect()
         card.addView(label(getString(R.string.safe_area_mapping_summary,
             rect.width, rect.height, rect.left, rect.top, 1920, 720), 14, MUTED))
         card.addView(actionButton(getString(R.string.cluster_safe_area_edit), false) {
@@ -5590,10 +5661,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private fun openClusterSafeAreaEditor() {
         clusterSafeAreaDialog?.dismiss()
         val previewOwner = Any()
-        val initial = AirPlayPersistence.loadClusterSafeAreaRect(this)
-            ?: DiLink4ClusterDisplay.defaultSafeAreaRect(
-                markerXPercent = AirPlayPersistence.loadClusterMarkerXPercent(this),
-                markerYPercent = AirPlayPersistence.loadClusterMarkerYPercent(this))
+        val initial = AirPlayPersistence.loadClusterSafeAreaRect(this) ?: defaultClusterSafeAreaRect()
         val editor = SafeAreaEditorView(this).apply {
             setBackgroundColor(SURFACE)
             setRect(initial, 1920, 720)

@@ -218,6 +218,34 @@ class Kx11DimNaviClientTest {
         assertEquals(1, fakeService.emittedToQnx.size)
     }
 
+    @Test
+    fun tracksRouteActiveForClusterEvenWhenHudOutputDisabled() {
+        val fakeService = FakeDimNaviServiceBinder()
+        val clock = FakeScheduler()
+        val activeEvents = mutableListOf<Boolean>()
+        val publisher = Kx11DimNaviPublisher(
+            binderProvider = { fakeService },
+            scheduleDelayed = clock::schedule,
+            cancelScheduled = clock::cancel,
+            elapsedRealtimeMs = { clock.nowMs },
+            nanoTime = { clock.nowMs * 1_000_000L },
+            onNaviActiveChanged = { activeEvents += it },
+        )
+
+        publisher.setEnabled(false)
+        publisher.onFrame(maneuverFrame(id = 3, type = 1, road = "Cluster Road"))
+        publisher.onFrame(routeFrame(state = 1, distNext = 300, distDest = 1200, etaSec = 90, maneuverId = 3))
+        clock.advanceBy(300L)
+
+        // HUD output stays suppressed, but cluster route-active callback still fires.
+        assertEquals(0, fakeService.emittedToQnx.size)
+        assertEquals(listOf(true), activeEvents)
+
+        // Ending guidance clears routeActive cleanly.
+        publisher.onFrame(routeFrame(state = 2, distNext = 0, distDest = 0, etaSec = 0, maneuverId = null))
+        assertEquals(listOf(true, false), activeEvents)
+    }
+
     private fun maneuverFrame(id: Int, type: Int, road: String): Iap2Frame = Iap2Frame(
         messageId = BydHudRouteState.ROUTE_GUIDANCE_MANEUVER_UPDATE,
         payload = tlvs(
