@@ -265,7 +265,7 @@ class Kx11WakeGuardService : Service() {
     }
 
     private fun handleBtWake(source: String) {
-        val finishIfTransient = {
+        val finishIfTransient: () -> Unit = {
             mainHandler.post {
                 if (!shouldRun(this@Kx11WakeGuardService)) {
                     stopForegroundCompat()
