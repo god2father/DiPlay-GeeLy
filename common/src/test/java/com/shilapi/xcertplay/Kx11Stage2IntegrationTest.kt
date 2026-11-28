@@ -223,7 +223,8 @@ class Kx11Stage2IntegrationTest {
         val info = dmgClass.getMethod("getDisplayInfo", Int::class.javaPrimitiveType).invoke(dmg, displayId)!!
         info.javaClass.getField("uniqueId").set(info, uniqueId)
         val shadowDmg = org.robolectric.shadow.api.Shadow.extract<Any>(dmg)
-        shadowDmg.javaClass.getMethod("changeDisplay", Int::class.javaPrimitiveType, info.javaClass)
+        shadowDmg.javaClass.getDeclaredMethod("changeDisplay", Int::class.javaPrimitiveType, info.javaClass)
+            .apply { isAccessible = true }
             .invoke(shadowDmg, displayId, info)
         org.robolectric.shadows.ShadowLooper.idleMainLooper()
     }
