@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay
 
+import android.content.Context
 import android.os.Build
 import android.util.DisplayMetrics
 import android.view.Display
@@ -43,6 +44,30 @@ internal object Kx11ClusterDisplay {
     const val DEFAULT_SAFE_BOTTOM = 620
 
     fun supported(model: String = Build.MODEL ?: ""): Boolean = Kx11DimSettings.isSupported(model)
+
+    private const val MIGRATIONS_PREFS = "diplay_kx11_migrations"
+    private const val KEY_FULL_NAVI_SYNC_V1 = "kx11_cluster_full_navi_sync_v1"
+
+    /**
+     * One-time migration for Stage 2.2 installs where the user toggled "Full-screen cluster
+     * navigation layout" while `cluster_map_enabled` remained false. Recorded in
+     * `diplay_kx11_migrations` so it runs at most once and never re-enables a later opt-out.
+     */
+    fun syncFullNaviClusterMapEnabled(context: Context, model: String = Build.MODEL ?: ""): Boolean {
+        if (!supported(model)) return false
+        val migrations = context.applicationContext.getSharedPreferences(MIGRATIONS_PREFS, Context.MODE_PRIVATE)
+        if (migrations.getBoolean(KEY_FULL_NAVI_SYNC_V1, false)) return false
+        val aligned = if (Kx11DimSettings.clusterFullNaviLayoutEnabled(context, model) &&
+            !AirPlayPersistence.loadClusterMapEnabled(context)
+        ) {
+            AirPlayPersistence.saveClusterMapEnabled(context, true)
+            true
+        } else {
+            false
+        }
+        migrations.edit().putBoolean(KEY_FULL_NAVI_SYNC_V1, true).apply()
+        return aligned
+    }
 
     fun defaultSafeAreaRect(): SafeAreaRect = SafeAreaRect(
         left = DEFAULT_SAFE_LEFT,

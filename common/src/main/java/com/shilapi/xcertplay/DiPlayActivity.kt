@@ -407,6 +407,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         super.onCreate(savedInstanceState)
         // Run KX11 one-time safe projection defaults before any early launcher-session redirect.
         Kx11ProjectionDefaults.applyOnceIfNeeded(this)
+        Kx11ClusterDisplay.syncFullNaviClusterMapEnabled(this)
         Kx11WakeGuardService.sync(this)
         // Back on the home page finishes this activity while the session runs on, so the icon lands here.
         if (savedInstanceState == null && isLauncherIntent(intent) && CarPlayBackgroundSession.hasSession()) {
@@ -2309,14 +2310,19 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     com.shilapi.xcertplay.hud.Kx11DimSettings.setNoDuckMusicEnabled(this, enabled)
                     markReconnectNeeded()
                 }
-                toggle(
+                val kx11ClusterSyncChecked =
+                    com.shilapi.xcertplay.hud.Kx11DimSettings.clusterFullNaviLayoutEnabled(this) ||
+                        AirPlayPersistence.loadClusterMapEnabled(this)
+                reconnectingToggle(
                     card,
                     getString(R.string.kx11_cluster_full_navi_title),
                     getString(R.string.kx11_cluster_full_navi_description),
-                    com.shilapi.xcertplay.hud.Kx11DimSettings.clusterFullNaviLayoutEnabled(this),
+                    kx11ClusterSyncChecked,
                 ) { enabled ->
                     com.shilapi.xcertplay.hud.Kx11DimSettings.setClusterFullNaviLayoutEnabled(this, enabled)
+                    AirPlayPersistence.saveClusterMapEnabled(this, enabled)
                     com.shilapi.xcertplay.hud.Kx11DimMenuController.settingChanged(this, enabled)
+                    render()
                 }
             }
             toggle(
@@ -2460,6 +2466,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 clusterMapEnabled) {
                 AirPlayPersistence.saveClusterMapEnabled(this, it)
                 if (Kx11ClusterDisplay.supported()) {
+                    com.shilapi.xcertplay.hud.Kx11DimSettings.setClusterFullNaviLayoutEnabled(this, it)
                     com.shilapi.xcertplay.hud.Kx11DimMenuController.settingChanged(this, it)
                 }
                 render()
@@ -3709,6 +3716,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     getString(R.string.shows_the_iphone_s_cluster_map_on_the_instrument_cluster_c),
                     AirPlayPersistence.loadClusterMapEnabled(this)) {
                     AirPlayPersistence.saveClusterMapEnabled(this, it)
+                    if (Kx11ClusterDisplay.supported()) {
+                        com.shilapi.xcertplay.hud.Kx11DimSettings.setClusterFullNaviLayoutEnabled(this, it)
+                        com.shilapi.xcertplay.hud.Kx11DimMenuController.settingChanged(this, it)
+                    }
                     render()
                 }
                 SetupGuide.Feature.DILINK4_ADB_CLUSTER -> reconnectingToggle(card,

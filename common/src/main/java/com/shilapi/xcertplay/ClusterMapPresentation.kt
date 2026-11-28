@@ -249,8 +249,17 @@ internal class ClusterMapPresentation(
 
         /** Keep the 5/5.1 selection order, then try the measured DiLink 4 projection display. */
         fun findDisplay(context: Context, theme: DiLink51ClusterLayout.Theme = DiLink51ClusterLayout.theme(context)): Display? {
-            val displays = context.getSystemService(DisplayManager::class.java)
-                ?.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION) ?: return null
+            val displayManager = context.getSystemService(DisplayManager::class.java) ?: return null
+            if (Kx11ClusterDisplay.supported()) {
+                // On 2025 KX11_A2, getDisplays(DISPLAY_CATEGORY_PRESENTATION) only returns HDMI
+                // outputs (0, 2) and omits the internal cluster panel Display 4 (local:131) even
+                // though its flags include FLAG_PRESENTATION (flags=139). Scan all displays instead.
+                return displayManager.displays.firstOrNull { display ->
+                    val size = sizeOf(display)
+                    Kx11ClusterDisplay.matches(display, size.x, size.y)
+                }
+            }
+            val displays = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
             val name = DiLink51ClusterLayout.displayName(
                 displays.map { it.name }, android.os.Build.FINGERPRINT, theme,
             )
@@ -261,12 +270,6 @@ internal class ClusterMapPresentation(
                     return displays.firstOrNull { display ->
                         val size = sizeOf(display)
                         GeelyClusterDisplay.matches(display, size.x, size.y)
-                    }
-                }
-                if (Kx11ClusterDisplay.supported()) {
-                    return displays.firstOrNull { display ->
-                        val size = sizeOf(display)
-                        Kx11ClusterDisplay.matches(display, size.x, size.y)
                     }
                 }
                 return displays.firstOrNull { display ->

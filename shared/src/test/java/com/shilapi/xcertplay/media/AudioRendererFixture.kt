@@ -11,6 +11,6 @@ internal fun audioRendererFixture(
     val type = Class.forName("com.shilapi.xcertplay.media.AudioRenderer")
     return type.declaredConstructors.single { !it.isSynthetic }.apply { isAccessible = true }
         .newInstance(format, false, false, 0, 0, AudioFocusCoordinator(null, false, false),
-            0, bufferMillis, report, null, null, null, AudioOutputRoutes(), false,
+            0, bufferMillis, report, null, null, null, AudioOutputRoutes(), false, false,
             { _: Any -> }, 0L, false, null, false)
 }

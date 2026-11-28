@@ -85,6 +85,7 @@ jobs:
             --tests "com.shilapi.xcertplay.hud.Kx11DimMediaClientTest" \
             --tests "com.shilapi.xcertplay.hud.Kx11DimMenuControllerTest" \
             --tests "com.shilapi.xcertplay.media.AudioFocusPermanentLossTest" \
+            --tests "com.shilapi.xcertplay.media.AudioRebufferCapacityTest" \
             --tests "com.shilapi.xcertplay.media.Kx11UnifiedAudioChannelTest" \
             --stacktrace
           ./gradlew :vehicle-probe:testDebugUnitTest \

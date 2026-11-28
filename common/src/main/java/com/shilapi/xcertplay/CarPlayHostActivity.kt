@@ -871,6 +871,7 @@ open class CarPlayHostActivity : ComponentActivity() {
             return
         }
         Kx11ProjectionDefaults.applyOnceIfNeeded(this)
+        Kx11ClusterDisplay.syncFullNaviClusterMapEnabled(this)
         val bluetoothState = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(bluetoothOnReceiver, bluetoothState, Context.RECEIVER_NOT_EXPORTED)
